@@ -10,6 +10,7 @@ import { isComponentAlreadyDeclaredInModules } from './utils/NgModulesAnalyzer';
 import { isDeclarable } from './utils/NgComponentAnalyzer';
 import { createStorybookWrapperComponent } from './StorybookWrapperComponent';
 import { computesTemplateFromComponent } from './ComputesTemplateFromComponent';
+import { createStorybookWrapperDirective } from './StorybookPropsDirective';
 
 const deprecatedStoryComponentWarning = deprecate(
   () => {},
@@ -46,7 +47,8 @@ export const getStorybookModuleMetadata = (
   }
   const component = storyComponent ?? annotatedComponent;
 
-  if (hasNoTemplate(template) && component) {
+  const hasTemplate = !hasNoTemplate(template);
+  if (!hasTemplate && component) {
     template = computesTemplateFromComponent(component, props, '');
   }
 
@@ -61,6 +63,10 @@ export const getStorybookModuleMetadata = (
     props
   );
 
+  const DirectiveToInject = hasNoComponent(component)
+    ? null
+    : createStorybookWrapperDirective(component, hasTemplate);
+
   // Look recursively (deep) if the component is not already declared by an import module
   const requiresComponentDeclaration =
     isDeclarable(component) &&
@@ -74,6 +80,7 @@ export const getStorybookModuleMetadata = (
     declarations: [
       ...(requiresComponentDeclaration ? [component] : []),
       ComponentToInject,
+      ...(DirectiveToInject ? [DirectiveToInject] : []),
       ...(moduleMetadata.declarations ?? []),
     ],
     imports: [BrowserModule, ...(moduleMetadata.imports ?? [])],
@@ -92,4 +99,8 @@ export const createStorybookModule = (ngModule: NgModule): Type<unknown> => {
 
 function hasNoTemplate(template: string | null | undefined): template is undefined {
   return template === null || template === undefined;
+}
+
+function hasNoComponent(component: Type<any> | null | undefined): component is undefined {
+  return component === null || component === undefined;
 }

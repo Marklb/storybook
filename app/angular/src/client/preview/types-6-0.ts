@@ -51,6 +51,14 @@ export type Parameters = DefaultParameters & {
   /** Uses legacy angular rendering engine that use dynamic component */
   angularLegacyRendering?: boolean;
   bootstrapModuleOptions?: unknown;
+  /**
+   * When story does not have `template` then ngOnChanges hook will be called
+   * manually for props changed after inital render. Necessary because Angular
+   * does not support dynamically adding template bindings.
+   *
+   * @default true
+   */
+  emulatePropBindingIfNotInInitialProps?: boolean;
 };
 
 export type StoryContext = DefaultStoryContext<AngularFramework> & { parameters: Parameters };

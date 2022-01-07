@@ -1,14 +1,13 @@
 import { Component, Directive, Input, Output, Pipe, Type } from '@angular/core';
 
+export type ComponentIORecord = {
+  propName: string;
+  templateName: string;
+};
+
 export type ComponentInputsOutputs = {
-  inputs: {
-    propName: string;
-    templateName: string;
-  }[];
-  outputs: {
-    propName: string;
-    templateName: string;
-  }[];
+  inputs: ComponentIORecord[];
+  outputs: ComponentIORecord[];
 };
 
 /**
