@@ -1555,7 +1555,7 @@ describe('StorybookWrapperComponent', () => {
         it('should render', async () => {
           await setProps({ simpleInp: 'a' });
           expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
-          await setProps({ isVisible: true });
+          await setProps({ simpleInp: 'a', isVisible: true });
           expect(getWrapperElement().innerHTML).toBe(
             dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
               "ng-reflect-ng-if": "true"
