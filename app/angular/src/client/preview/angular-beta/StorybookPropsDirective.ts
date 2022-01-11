@@ -1,6 +1,7 @@
 import {
   AfterViewInit,
   ChangeDetectorRef,
+  ComponentRef,
   Directive,
   ElementRef,
   EventEmitter,
@@ -87,7 +88,8 @@ export const createStorybookWrapperDirective = (
 
     private readonly previousValues: { [key: string]: any } = {};
 
-    // eslint-disable-next-line no-useless-constructor
+    private hasInitialized = false;
+
     constructor(
       @Inject(STORY_PROPS) private readonly storyProps$: Subject<ICollection | undefined>,
       // @Inject(STORY) private story$: Observable<StoryFnAngularReturnType>,
@@ -99,22 +101,46 @@ export const createStorybookWrapperDirective = (
       @Optional() private readonly outlet: NgComponentOutlet,
       @Optional() @SkipSelf() private readonly sbPropsDir?: StorybookPropsDirective,
       @Optional() @Self() @Inject(storyComponent) readonly componentInstance?: any
-    ) {}
+    ) {
+      console.log('[StorybookPropsDirective] constructor');
+
+      // Subscribing in constructor to update initial props and call manual
+      // ngOnChanges before ngOnInit.
+      this.subscription = this.storyProps$.subscribe((storyProps = {}) => {
+        console.log('[StorybookPropsDirective] constructor storyProps', storyProps);
+        // All props are added as component properties
+        // Object.assign(this, storyProps);
+        this.setProps(this.getInstance(), storyProps, true);
+
+        // this.changeDetectorRef.detectChanges();
+        this.changeDetectorRef.markForCheck();
+
+        // Check if ngOnInit has been called, because detectChanges shouldn't be
+        // called until UPDATE mode.
+        if (this.hasInitialized) {
+          this.changeDetectorRef.detectChanges();
+        }
+      });
+    }
 
     ngOnInit(): void {
-      let isFirst = true;
-      this.subscription = this.storyProps$
-        .pipe(
-          tap((storyProps: ICollection | undefined) => {
-            this.setProps(this.getInstance(), storyProps, isFirst);
-            isFirst = false;
+      console.log('[StorybookPropsDirective] ngOnInit');
+      // let isFirst = true;
+      // this.subscription = this.storyProps$
+      //   .pipe(
+      //     tap((storyProps: ICollection | undefined) => {
+      //       console.log('[StorybookPropsDirective] ngOnInit storyProps', storyProps);
+      //       this.setProps(this.getInstance(), storyProps, isFirst);
+      //       isFirst = false;
 
-            this.changeDetectorRef.markForCheck();
-            // Must detect changes on the current component in order to update any changes in child component's @HostBinding properties (angular/angular#22560)
-            this.changeDetectorRef.detectChanges();
-          })
-        )
-        .subscribe();
+      //       this.changeDetectorRef.markForCheck();
+      //       // Must detect changes on the current component in order to update any changes in child component's @HostBinding properties (angular/angular#22560)
+      //       this.changeDetectorRef.detectChanges();
+      //     })
+      //   )
+      //   .subscribe();
+
+      this.hasInitialized = true;
     }
 
     ngAfterViewInit(): void {
