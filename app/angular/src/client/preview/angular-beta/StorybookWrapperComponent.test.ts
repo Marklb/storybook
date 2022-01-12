@@ -48,6 +48,7 @@ describe('StorybookWrapperComponent', () => {
   let rendererService: AbstractRenderer;
   let root: HTMLElement;
   let ngOnChangesSpy: jest.SpyInstance<void, [SimpleChanges]>;
+  let ngOnInitSpy: jest.SpyInstance<void, []>;
   let fnInpSetSpy: jest.SpyInstance<void, [string]>;
   let somethingSpy: jest.SpyInstance<void, [string]>;
   let data: Parameters<AbstractRenderer['render']>[0];
@@ -63,6 +64,7 @@ describe('StorybookWrapperComponent', () => {
 
   beforeEach(async () => {
     ngOnChangesSpy = jest.spyOn(FooComponent.prototype, 'ngOnChanges');
+    ngOnInitSpy = jest.spyOn(FooComponent.prototype, 'ngOnInit');
     fnInpSetSpy = jest.spyOn(FooComponent.prototype, 'fnInp', 'set');
     somethingSpy = jest.spyOn(FooComponent.prototype, 'something');
 
@@ -1516,33 +1518,23 @@ describe('StorybookWrapperComponent', () => {
 
     // //////////
 
-    // it('should set inputs when component conditionally renders', async () => {
-    //   setTemplate(`<ng-container *ngIf="active"><foo></foo><ng-container>`);
-    //   // setTemplate(`<ng-container *ngIf="active"><foo [fnInp]="fnInp"></foo><ng-container>`);
-    //   // await setProps({ fnInp: 'f' });
-    //   await setProps({ fnInp: 'f', active: true });
-    //   // expect(getWrapperElement().innerHTML).toBe(`<!--bindings={}-->`);
-    //   await setProps({ fnInp: 'b', active: true });
-    //   expect(getWrapperElement().innerHTML).toBe(
-    //     // dedent`<foo>[][][][]</foo><!--ng-container--><!--ng-container--><!--bindings={
-    //     //         "ng-reflect-ng-if": "true"
-    //     //       }-->`
-    //     dedent`<foo ng-reflect-fn-inp="b">[][][b][]</foo><!--ng-container--><!--bindings={
-    //             "ng-reflect-ng-if": "true"
-    //           }-->`
-    //   );
-    //   // expect(ngOnChangesSpy).toBeCalledTimes(1);
-    //   expect(somethingSpy).toBeCalledTimes(1);
-    // });
-
-    // it('should set getter/setter input t', async () => {
-    //   setTemplate(`<foo [fnInp]="fnInp"></foo>`);
-    //   await setProps({ fnInp: 'f' });
-    //   // expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-    //   expect(getWrapperElement().innerHTML).toBe('<foo ng-reflect-fn-inp="f">[][][f][]</foo><!--container-->');
-    //   // expect(ngOnChangesSpy).toBeCalledTimes(1);
-    //   expect(somethingSpy).toBeCalledTimes(1);
-    // });
+    describe('ngOnChanges', () => {
+      it('should call before ngOnInit', async () => {
+        await setProps({ simpleInp: 'a' });
+        expect(ngOnChangesSpy).toBeCalledTimes(1);
+        expect(ngOnChangesSpy).toHaveBeenCalledWith({
+          simpleInp: expect.objectContaining({
+            previousValue: undefined,
+            currentValue: 'a',
+            firstChange: true,
+          }),
+        });
+        expect(ngOnInitSpy).toBeCalledTimes(1);
+        const ngOnChangesOrder = ngOnChangesSpy.mock.invocationCallOrder[0];
+        const ngOnInitOrder = ngOnInitSpy.mock.invocationCallOrder[0];
+        expect(ngOnChangesOrder).toBeLessThan(ngOnInitOrder);
+      });
+    });
   });
 
   describe('component initially not rendered in template', () => {
@@ -1668,6 +1660,8 @@ class FooComponent implements OnChanges {
       });
     };
   }
+
+  ngOnInit() {}
 
   ngOnChanges(changes: SimpleChanges) {}
 
