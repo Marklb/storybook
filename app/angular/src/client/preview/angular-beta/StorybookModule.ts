@@ -5,6 +5,7 @@ import dedent from 'ts-dedent';
 import { Subject } from 'rxjs';
 import deprecate from 'util-deprecate';
 import { ICollection, StoryFnAngularReturnType } from '../types';
+import { Parameters } from '../types-6-0';
 import { storyPropsProvider } from './StorybookProvider';
 import { isComponentAlreadyDeclaredInModules } from './utils/NgModulesAnalyzer';
 import { isDeclarable } from './utils/NgComponentAnalyzer';
@@ -37,7 +38,8 @@ export const getStorybookModuleMetadata = (
     component?: any;
     targetSelector: string;
   },
-  storyProps$: Subject<ICollection>
+  storyProps$: Subject<ICollection>,
+  parameters: Parameters = {}
 ): NgModule => {
   const { component: storyComponent, props, styles, moduleMetadata = {} } = storyFnAngular;
   let { template } = storyFnAngular;
@@ -60,7 +62,8 @@ export const getStorybookModuleMetadata = (
     template,
     component,
     styles,
-    props
+    props,
+    parameters
   );
 
   const DirectiveToInject = hasNoComponent(component)

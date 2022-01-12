@@ -59,6 +59,13 @@ export type Parameters = DefaultParameters & {
    * @default true
    */
   emulatePropBindingIfNotInInitialProps?: boolean;
+  /**
+   * When a story has a template with multiple instances of the story component
+   * then props will be applied to each instance.
+   *
+   * @default true
+   */
+  setPropsOnAllComponentInstances?: boolean;
 };
 
 export type StoryContext = DefaultStoryContext<AngularFramework> & { parameters: Parameters };

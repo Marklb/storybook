@@ -98,29 +98,36 @@ export const createStorybookWrapperDirective = (
       @Inject(STORY_INITAL_PROPS) private readonly storyInitialProps: ICollection,
       private readonly changeDetectorRef: ChangeDetectorRef,
       private readonly vcr: ViewContainerRef,
+      // private readonly compRef: ComponentRef<any>,
       @Optional() private readonly outlet: NgComponentOutlet,
       @Optional() @SkipSelf() private readonly sbPropsDir?: StorybookPropsDirective,
       @Optional() @Self() @Inject(storyComponent) readonly componentInstance?: any
     ) {
       console.log('[StorybookPropsDirective] constructor');
 
-      // Subscribing in constructor to update initial props and call manual
-      // ngOnChanges before ngOnInit.
-      this.subscription = this.storyProps$.subscribe((storyProps = {}) => {
-        console.log('[StorybookPropsDirective] constructor storyProps', storyProps);
-        // All props are added as component properties
-        // Object.assign(this, storyProps);
-        this.setProps(this.getInstance(), storyProps, true);
+      const setPropsEnabled = this.storyWrapper.registerPropsDirectiveInstance(this);
+      const setPropsOnAllComponentInstances =
+        this.storyParameters.setPropsOnAllComponentInstances ?? true;
 
-        // this.changeDetectorRef.detectChanges();
-        this.changeDetectorRef.markForCheck();
+      if (setPropsOnAllComponentInstances || setPropsEnabled) {
+        // Subscribing in constructor to update initial props and call manual
+        // ngOnChanges before ngOnInit.
+        this.subscription = this.storyProps$.subscribe((storyProps = {}) => {
+          console.log('[StorybookPropsDirective] constructor storyProps', storyProps);
+          // All props are added as component properties
+          // Object.assign(this, storyProps);
+          this.setProps(this.getInstance(), storyProps, true);
 
-        // Check if ngOnInit has been called, because detectChanges shouldn't be
-        // called until UPDATE mode.
-        if (this.hasInitialized) {
-          this.changeDetectorRef.detectChanges();
-        }
-      });
+          // this.changeDetectorRef.detectChanges();
+          this.changeDetectorRef.markForCheck();
+
+          // Check if ngOnInit has been called, because detectChanges shouldn't be
+          // called until UPDATE mode.
+          if (this.hasInitialized) {
+            this.changeDetectorRef.detectChanges();
+          }
+        });
+      }
     }
 
     ngOnInit(): void {
@@ -158,6 +165,8 @@ export const createStorybookWrapperDirective = (
         }
       });
       this.propSubscriptions.clear();
+
+      this.storyWrapper.unregisterPropsDirectiveInstance(this);
     }
 
     /**

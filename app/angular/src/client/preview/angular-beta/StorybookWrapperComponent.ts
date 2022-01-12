@@ -21,7 +21,10 @@ import { Parameters } from '../types-6-0';
 import { STORY_PROPS } from './StorybookProvider';
 import { ComponentInputsOutputs, getComponentInputsOutputs } from './utils/NgComponentAnalyzer';
 
-export type StoryWrapper = {};
+export type StoryWrapper = {
+  registerPropsDirectiveInstance(instance: any): boolean;
+  unregisterPropsDirectiveInstance(instance: any): void;
+};
 
 export const STORY_WRAPPER = new InjectionToken<StoryWrapper>('STORY_WRAPPER');
 export const STORY_PARAMETERS = new InjectionToken<Parameters>('STORY_PARAMETERS');
@@ -85,6 +88,8 @@ export const createStorybookWrapperComponent = (
 
     private storyWrapperPropsSubscription: Subscription;
 
+    private componentInstances: any[] = [];
+
     @ViewChild(viewChildSelector, { static: true }) storyComponentElementRef: ElementRef;
 
     @ViewChild(viewChildSelector, { read: ViewContainerRef, static: true })
@@ -101,8 +106,10 @@ export const createStorybookWrapperComponent = (
     ) {}
 
     ngOnInit(): void {
+      console.log('[StorybookWrapperComponent] ngOnInit');
       // Subscribes to the observable storyProps$ to keep these properties up to date
       this.storyWrapperPropsSubscription = this.storyProps$.subscribe((storyProps = {}) => {
+        console.log('[StorybookWrapperComponent] ngOnInit storyProps', storyProps);
         // All props are added as component properties
         Object.assign(this, storyProps);
 
@@ -187,6 +194,26 @@ export const createStorybookWrapperComponent = (
       if (this.storyWrapperPropsSubscription != null) {
         this.storyWrapperPropsSubscription.unsubscribe();
       }
+    }
+
+    /**
+     * Tracks the props directive instances.
+     *
+     * Returns true if this is the first registered instance.
+     */
+    public registerPropsDirectiveInstance(instance: any): boolean {
+      if (this.componentInstances.findIndex((x) => x === instance) === -1) {
+        this.componentInstances.push(instance);
+      }
+
+      return this.componentInstances.length === 1;
+    }
+
+    /**
+     * Removes a tracked props directive instance.
+     */
+    public unregisterPropsDirectiveInstance(instance: any): void {
+      this.componentInstances = this.componentInstances.filter((x) => x !== instance);
     }
   }
   return StorybookWrapperComponent;

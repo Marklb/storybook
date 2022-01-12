@@ -113,7 +113,8 @@ export abstract class AbstractRenderer {
     const newStoryProps$ = new BehaviorSubject<ICollection>(storyFnAngular.props);
     const moduleMetadata = getStorybookModuleMetadata(
       { storyFnAngular, component, targetSelector },
-      newStoryProps$
+      newStoryProps$,
+      parameters
     );
 
     if (

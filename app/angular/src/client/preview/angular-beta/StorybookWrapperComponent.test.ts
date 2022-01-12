@@ -1578,6 +1578,27 @@ describe('StorybookWrapperComponent', () => {
       });
     });
   });
+
+  describe('multiple instances of component', () => {
+    beforeEach(() => {
+      data.storyFnAngular.template = `<foo></foo><foo></foo>`;
+    });
+
+    it('should set props on all instances', async () => {
+      await setProps({ simpleInp: 'a' });
+      expect(getWrapperElement().innerHTML).toBe(
+        '<foo>[a][][][]</foo><!--container--><foo>[a][][][]</foo><!--container-->'
+      );
+    });
+
+    it('should set props on first instance', async () => {
+      data.parameters.setPropsOnAllComponentInstances = false;
+      await setProps({ simpleInp: 'a' });
+      expect(getWrapperElement().innerHTML).toBe(
+        '<foo>[a][][][]</foo><!--container--><foo>[][][][]</foo><!--container-->'
+      );
+    });
+  });
 });
 
 function emitOutput(outputPropName: string, data: any): void {
