@@ -43,14 +43,16 @@ declare const document: Document;
 //
 // TODO: When a bound prop is removed should the story be fully recreated, since
 // template binding can't be removed?
+// 
+// TODO: Test that inputs/outputs/ngOnChanges work with inheritance.
 
 describe('StorybookWrapperComponent', () => {
   let rendererService: AbstractRenderer;
   let root: HTMLElement;
   let ngOnChangesSpy: jest.SpyInstance<void, [SimpleChanges]>;
   let ngOnInitSpy: jest.SpyInstance<void, []>;
-  let fnInpSetSpy: jest.SpyInstance<void, [string]>;
-  let somethingSpy: jest.SpyInstance<void, [string]>;
+  let fnInpSetSpy: jest.SpyInstance<void, [string | null | undefined]>;
+  let somethingSpy: jest.SpyInstance<void, [string | null | undefined]>;
   let data: Parameters<AbstractRenderer['render']>[0];
 
   const setProps = async (props: typeof data['storyFnAngular']['props']): Promise<void> => {
@@ -97,7 +99,7 @@ describe('StorybookWrapperComponent', () => {
   describe('component', () => {
     describe('simple input', () => {
       describe('in inital props', () => {
-        it('should set', async () => {
+        it('should set abcf', async () => {
           await setProps({ simpleInp: 'a' });
           expect(getWrapperElement().innerHTML).toBe(
             '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
@@ -128,7 +130,7 @@ describe('StorybookWrapperComponent', () => {
           });
         });
 
-        it('should set when prop changes', async () => {
+        it('should set when prop changes abc', async () => {
           await setProps({ simpleInp: 'a' });
           await setProps({ simpleInp: 'b' });
           expect(getWrapperElement().innerHTML).toBe(
@@ -150,7 +152,7 @@ describe('StorybookWrapperComponent', () => {
           await setProps({});
         });
 
-        it('should set', async () => {
+        it('should set abc', async () => {
           await setProps({ simpleInp: 'a' });
           expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
           expect(ngOnChangesSpy).toBeCalledTimes(1);
@@ -1651,6 +1653,8 @@ class FooComponent implements OnChanges {
 
   @Output('reNamedOut') toReNamedOut = new EventEmitter<boolean>();
 
+  onChangesCount = 0;
+
   constructor(private readonly elementRef: ElementRef, private readonly ngZone: NgZone) {
     // eslint-disable-next-line no-underscore-dangle
     this.elementRef.nativeElement.__testTrigger = (outputPropName: string, data: any) => {
@@ -1663,7 +1667,9 @@ class FooComponent implements OnChanges {
 
   ngOnInit() {}
 
-  ngOnChanges(changes: SimpleChanges) {}
+  ngOnChanges(changes: SimpleChanges) {
+    this.onChangesCount += 1;
+  }
 
   something(val: string | undefined | null) {}
 }

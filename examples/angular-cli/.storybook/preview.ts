@@ -11,7 +11,7 @@ const filtered = !docJson?.components
       ...docJson,
       components: docJson.components.filter((c) => c.name !== 'ButtonComponent'),
     };
-setCompodocJson(filtered);
+// setCompodocJson(filtered);
 
 addCssWarning();
 
