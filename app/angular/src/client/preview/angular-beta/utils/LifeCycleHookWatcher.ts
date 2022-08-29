@@ -1,11 +1,10 @@
-import { SimpleChanges } from '@angular/core'
-
+import { SimpleChanges } from '@angular/core';
 
 function decorateNgAfterViewInit(
   ngAfterViewInit: (() => void) | null | undefined,
   preLog: string[]
 ) {
-  return function(this: any) {
+  return function (this: any) {
     // TODO: Should this be before or after original call?
     // setWrappedPropsValues(this)
 
@@ -13,9 +12,9 @@ function decorateNgAfterViewInit(
 
     // Invoke the original `ngAfterViewInit` if it exists
     if (ngAfterViewInit) {
-      ngAfterViewInit.call(this)
+      ngAfterViewInit.call(this);
     }
-  }
+  };
 }
 
 function decorateProviderDirectiveOrComponent(type: any, style: string): void {
@@ -58,16 +57,10 @@ function decorateProviderDirectiveOrComponent(type: any, style: string): void {
  */
 export function LifeCycleHooksLog(style: string): ClassDecorator {
   // tslint:disable-next-line: only-arrow-functions
-  return function(
-    type: any
-  ) {
+  return function (type: any) {
     decorateProviderDirectiveOrComponent(type, style);
-  }
+  };
 }
-
-
-
-
 
 export const BOUND_PROPS: unique symbol = Symbol('__boundProps');
 export const CALLED_NG_ON_INIT: unique symbol = Symbol('__calledNgOnInit');
@@ -76,7 +69,10 @@ export const ORIGINAL_NG_ON_INIT: unique symbol = Symbol('__originalNgOnInit');
 export const ORIGINAL_NG_ON_CHANGES: unique symbol = Symbol('__originalNgOnChanges');
 export const HOOKED_NG_ON_CHANGES_CALLBACK: unique symbol = Symbol('__hookedNgOnChangesCallback');
 
-export type HookedNgOnChangesCallback = (initialChanges: SimpleChanges | undefined, original: any) => void;
+export type HookedNgOnChangesCallback = (
+  initialChanges: SimpleChanges | undefined,
+  original: any
+) => void;
 
 function getBoundProps(instance: any): SimpleChanges | undefined {
   return instance[BOUND_PROPS];
@@ -173,7 +169,7 @@ export function hookChanges(component: any) {
   component.prototype.ngOnChanges = function (this: any, changes: SimpleChanges) {
     // boundProps = changes;
     setBoundProps(this, changes);
-    setCalledNgOnChanges(this, true)
+    setCalledNgOnChanges(this, true);
     // boundProps = {};
     // Object.keys(changes).forEach((propName: string) => {
     //   return {
@@ -193,7 +189,8 @@ export function hookChanges(component: any) {
 
     const originalNgOnChanges = getOriginalNgOnChanges(component);
     if (originalNgOnChanges) {
-      console.log('hooked ngOnChanges', this, changes);
+      // console.log('hooked ngOnChanges', this, changes);
+      console.log('hooked ngOnChanges');
       originalNgOnChanges.call(this, changes);
     }
   };

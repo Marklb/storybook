@@ -19,6 +19,7 @@ import {
   Type,
   ViewChild,
   ViewContainerRef,
+  ɵɵNgOnChangesFeature,
 } from '@angular/core';
 import { isObservable, Observable, Subject, Subscription } from 'rxjs';
 import { NgComponentOutlet } from '@angular/common';
@@ -50,7 +51,43 @@ import {
   setCalledNgOnChanges,
 } from './utils/LifeCycleHookWatcher';
 
-const EMPTY_OBJ = {};
+/**
+ * Return reference to internal EMPTY_OBJ. It is not exported and I did not see
+ * a way to access it directly, but initially a component's __ngSimpleChanges__
+ * is assigned a reference to EMPTY_OBJ as previous.
+ *
+ * Trying to mix Storybook props and Angular change detection was requiring
+ * flakey logic and life-cycle hook proxies. To determine when Angular is
+ * updating properties, I could determine approximately when Angular is updating
+ * properties by determining the life-cycle hook called before and after the
+ * properties get updated on the component instance. To avoid two calls to
+ * ngOnChanges and merge Storybook's SimpleChanges into the SimpleChanges passed
+ * to ngOnChanges, by Angular, I had to proxy the component's ngOnChanges and
+ * merge Shorybook's changes into the SimpleChanges argument. Also, it needed to
+ * be known when to directly call ngOnChanges if Angular will not be calling it.
+ *
+ * I realized I could drop a lot of my flakey code and just update the
+ * component's __ngSimpleChanges__, which has checks for the internal EMPTY_OBJ.
+ */
+function getEmpty() {
+  const tmp: any = {
+    type: {
+      prototype: {
+        ngOnChanges: {},
+      },
+    },
+    declaredInputs: { x: {} },
+  };
+  ɵɵNgOnChangesFeature()(tmp);
+  tmp.setInput(tmp, undefined, 'x', 'x');
+  // const store = getSimpleChangesStore(tmp);
+  // eslint-disable-next-line no-underscore-dangle
+  const store = tmp.__ngSimpleChanges__;
+  const empty = store.previous;
+  return empty;
+}
+
+const EMPTY_OBJ = getEmpty();
 function ngOnChangesSetInput(
   instance: any,
   value: any,
@@ -63,7 +100,8 @@ function ngOnChangesSetInput(
   const current = simpleChangesStore.current || (simpleChangesStore.current = {});
   // eslint-disable-next-line prefer-destructuring
   const previous = simpleChangesStore.previous;
-  const declaredName = this.declaredInputs[publicName];
+  // const declaredName = this.declaredInputs[publicName];
+  const declaredName = privateName;
   const previousChange = previous[declaredName];
   current[declaredName] = new SimpleChange(
     previousChange && previousChange.currentValue,
@@ -80,6 +118,14 @@ function getSimpleChangesStore(instance: any): any {
 function setSimpleChangesStore(instance: any, store: any) {
   // eslint-disable-next-line no-return-assign, no-param-reassign
   return (instance[SIMPLE_CHANGES_STORE] = store);
+}
+
+function simpleChangesPrevious(instance: any, propName: string) {
+  const simpleChangesStore = getSimpleChangesStore(instance);
+  if (simpleChangesStore?.previous) {
+    return simpleChangesStore.previous[propName]?.currentValue;
+  }
+  return undefined;
 }
 
 export const createStorybookWrapperDirective = (
@@ -119,31 +165,13 @@ export const createStorybookWrapperDirective = (
   };
 
   let { selector } = ngComponentMetadata;
-  if (!ngComponentMetadata.selector) {
+  if (!selector) {
     // Allow to add renderer component when NgComponent selector is undefined
     selector = '[ngComponentOutlet]';
   }
 
-  // let startPropSetFn:
-  //   | ((
-  //       initialChanges: SimpleChanges | undefined,
-  //       originalNgOnChanges: (changes: SimpleChanges) => void
-  //     ) => void)
-  //   | undefined;
-  if (storyComponent) {
-    hookChanges(storyComponent);
-    // hookChanges(storyComponent, (boundProps: any, originalNgOnChanges: any) => {
-    //   console.log('~~callback', boundProps);
-    //   if (startPropSetFn) {
-    //     startPropSetFn.call(null, boundProps, originalNgOnChanges);
-    //   }
-    // });
-  }
+  const preLog = ['%c[StorybookPropsDirective]', 'color:violet'];
 
-  const preLog = [
-    '%c[StorybookPropsDirective]', 'color:violet'
-  ]
-  
   // @LifeCycleHooksLog('color:violet')
   @Directive({ selector })
   class StorybookPropsDirective implements OnInit, AfterViewInit, OnDestroy {
@@ -153,23 +181,11 @@ export const createStorybookWrapperDirective = (
 
     private readonly previousValues: { [key: string]: any } = {};
 
-    private hasInitialized = false;
-
     private setPropsEnabled = false;
 
     private propsUpdatingStarted = false;
 
-    private templateBoundProps: string[] = [];
-
-    private initialChanges: SimpleChanges | undefined;
-
-    private originalNgOnChanges: ((changes: SimpleChanges) => void) | undefined;
-
     private propsToSet: ICollection | undefined;
-
-    private isSettingProps = false;
-
-    private settedProps: string[] = [];
 
     constructor(
       @Inject(STORY_PROPS) private readonly storyProps$: Subject<ICollection | undefined>,
@@ -185,31 +201,7 @@ export const createStorybookWrapperDirective = (
       @Optional() @SkipSelf() private readonly sbPropsDir?: StorybookPropsDirective,
       @Optional() @Self() @Inject(storyComponent) readonly componentInstance?: any
     ) {
-      // console.log('[StorybookPropsDirective] constructor');
       console.log(...preLog, 'constructor');
-
-      const startPropSetFn = (initialChanges: SimpleChanges | undefined, original: any) => {
-        if (initialChanges) {
-          this.initialChanges = initialChanges;
-          this.templateBoundProps = Object.keys(initialChanges);
-          // this.templateBoundProps.forEach((propName: string) => {
-          //   this.previousValues[propName] = initialChanges[propName].currentValue;
-          // });
-          this.originalNgOnChanges = original
-        }
-        console.log('~~~~~~~startPropSetFn', initialChanges, this.templateBoundProps);
-
-        // this.startPropsUpdating();
-        
-        // if (!this.isSettingProps) {
-        //   this.isSettingProps = true;
-        //   this.isSettingProps = false;
-        // }
-        this.setProps(this.getInstance(), this.propsToSet, initialChanges);
-        // this.changeDetectorRef.markForCheck();
-        // this.changeDetectorRef.detectChanges();
-      };
-      hookedChangesCallback(this.getInstance(), startPropSetFn);
 
       this.startPropsUpdating();
 
@@ -223,15 +215,11 @@ export const createStorybookWrapperDirective = (
 
       this.storyWrapper.ngOnContentCheckedSubject.subscribe(() => {
         console.log('ngOnContentCheckedSubject');
-        // this.startPropsUpdating();
-        // if (!hasCalledNgOnInit(this.getInstance()) && hasCalledNgOnChanges(this.getInstance())) {
-        //   this.setProps(this.getInstance(), this.propsToSet, this.initialChanges);
-        // }
         if (this.propsToSet) {
           this.setProps(this.getInstance(), this.propsToSet, null);
-          this.propsToSet = null
+          this.propsToSet = null;
         }
-        setCalledNgOnChanges(this.getInstance(), false)
+        setCalledNgOnChanges(this.getInstance(), false);
       });
     }
 
@@ -246,48 +234,28 @@ export const createStorybookWrapperDirective = (
         InjectFlags.Self | InjectFlags.Optional
       );
       console.log('directives', directives);
-
-      // let isFirst = true;
-      // this.subscription = this.storyProps$
-      //   .pipe(
-      //     tap((storyProps: ICollection | undefined) => {
-      //       console.log('[StorybookPropsDirective] ngOnInit storyProps', storyProps);
-      //       this.setProps(this.getInstance(), storyProps, isFirst);
-      //       isFirst = false;
-
-      //       this.changeDetectorRef.markForCheck();
-      //       // Must detect changes on the current component in order to update any changes in child component's @HostBinding properties (angular/angular#22560)
-      //       this.changeDetectorRef.detectChanges();
-      //     })
-      //   )
-      //   .subscribe();
-
-      // this.startPropsUpdating();
-
-      this.hasInitialized = true;
     }
 
     ngOnChanges(changes: SimpleChanges) {
       console.log(...preLog, 'ngOnChanges', changes);
     }
-  
+
     ngDoCheck() {
       console.log(...preLog, 'ngDoCheck');
-      this.settedProps = [];
     }
-  
+
     ngAfterContentInit() {
       console.log(...preLog, 'ngAfterContentInit');
     }
-  
+
     ngAfterContentChecked() {
       console.log(...preLog, 'ngAfterContentChecked');
     }
-  
+
     ngAfterViewInit() {
       console.log(...preLog, 'ngAfterViewInit');
     }
-  
+
     ngAfterViewChecked() {
       console.log(...preLog, 'ngAfterViewChecked');
     }
@@ -309,7 +277,7 @@ export const createStorybookWrapperDirective = (
     }
 
     private startPropsUpdating() {
-      console.log('startPropsUpdating')
+      console.log('startPropsUpdating');
       if (this.propsUpdatingStarted) {
         return;
       }
@@ -319,27 +287,9 @@ export const createStorybookWrapperDirective = (
         this.storyParameters.setPropsOnAllComponentInstances ?? true;
 
       if (setPropsOnAllComponentInstances || this.setPropsEnabled) {
-        // this.setProps(this.getInstance(), { other: 'InitOther' }, true);
-
-        // Subscribing in constructor to update initial props and call manual
-        // ngOnChanges before ngOnInit.
         this.subscription = this.storyProps$.subscribe((storyProps = {}) => {
           console.log('[StorybookPropsDirective] storyProps$', storyProps);
-          
           this.propsToSet = storyProps;
-
-          // All props are added as component properties
-          // Object.assign(this, storyProps);
-          // this.setProps(this.getInstance(), storyProps, true);
-
-          // // this.changeDetectorRef.detectChanges();
-          // this.changeDetectorRef.markForCheck();
-
-          // // Check if ngOnInit has been called, because detectChanges shouldn't be
-          // // called until UPDATE mode.
-          // if (this.hasInitialized) {
-          //   this.changeDetectorRef.detectChanges();
-          // }
         });
       }
     }
@@ -364,43 +314,28 @@ export const createStorybookWrapperDirective = (
 
         if (previousValue !== value) {
           if (info !== undefined) {
-            // if (hasTemplate || !isFirst) {
             if (this.emulateTemplateBinding(key)) {
               if (info.ioType === 'input') {
-                // eslint-disable-next-line no-param-reassign
-                // instance[instancePropName] = value;
-                // if (hasNgOnChangesHook) {
-                //   changes[instancePropName] = new SimpleChange(
-                //     previousValue,
-                //     value,
-                //     !Object.prototype.hasOwnProperty.call(this.previousValues, key)
-                //   );
-                // }
-                // __ngSimpleChanges__
-                // eslint-disable-next-line no-underscore-dangle
-                // const simpleChangesStore = (this.getInstance() as any).__ngSimpleChanges__;
                 ngOnChangesSetInput(this.getInstance(), value, key, instancePropName);
               } else if (info.ioType === 'output') {
                 const instanceProperty = instance[instancePropName];
-                // if (instanceProperty instanceof EventEmitter) {
                 if (isObservable(instanceProperty)) {
                   this.setPropSubscription(key, instanceProperty, value);
                 }
-                // TODO: What to do if this isn't an EventEmitter? Does Angular support Observable?
+                // TODO: What to do if this isn't an Observable?
               }
             }
           } else {
             // eslint-disable-next-line no-param-reassign
             instance[instancePropName] = value;
-            this.settedProps.push(key);
           }
 
           this.previousValues[key] = value;
         }
       });
 
-      // this.callNgOnChangesHook(instance, changes);
-      this.setNgModel(instance, props);
+      // TODO: Check if the component is a form control.
+      // this.setNgModel(instance, props);
     }
 
     /**
@@ -427,26 +362,6 @@ export const createStorybookWrapperDirective = (
      */
     private isTemplateBoundProp(propName: string): boolean {
       return Object.prototype.hasOwnProperty.call(this.storyInitialProps, propName);
-    }
-
-    /**
-     * Manually call 'ngOnChanges' hook because angular doesn't do that for dynamic components
-     * Issue: [https://github.com/angular/angular/issues/8903]
-     *
-     * NOTE: If directives are attached to the same instance, their inputs/outputs will not be set.
-     */
-    private callNgOnChangesHook(instance: any, changes: SimpleChanges): void {
-      console.log('~!~ callNgOnChangesHook', instance, changes);
-      if (Object.keys(changes).length) {
-        // if (this.originalNgOnChanges) {
-        if (storyComponent) {
-          const originalNgOnChanges = getOriginalNgOnChanges(storyComponent);
-          // this.originalNgOnChanges.call(instance, changes);
-          originalNgOnChanges.call(instance, changes);
-        } else {
-          instance.ngOnChanges(changes);
-        }
-      }
     }
 
     /**

@@ -1,11 +1,15 @@
 import {
   Component,
+  Directive,
+  DoCheck,
   ElementRef,
   EventEmitter,
+  forwardRef,
   getPlatform,
   Input,
   NgZone,
   OnChanges,
+  OnInit,
   Output,
   SimpleChanges,
   TemplateRef,
@@ -43,8 +47,87 @@ declare const document: Document;
 //
 // TODO: When a bound prop is removed should the story be fully recreated, since
 // template binding can't be removed?
-// 
+//
 // TODO: Test that inputs/outputs/ngOnChanges work with inheritance.
+
+// interface TestDirective extends OnInit, OnChanges {
+//   simpleInp: string | undefined | null;
+//   toReNamedInp: string | undefined | null;
+//   fnInp: string | undefined | null;
+//   thingInpValue: string | undefined | null;
+//   metaInput: boolean | undefined | null;
+//   metaOutput: EventEmitter<boolean>;
+//   simpleOut: EventEmitter<boolean>;
+//   toReNamedOut: EventEmitter<boolean>;
+//   something(val: string | undefined | null): void;
+// }
+
+@Directive()
+class BaseTestDirective implements OnInit, OnChanges {
+  @Input() simpleInp: string | undefined | null;
+
+  @Input('reNamedInp') toReNamedInp: string | undefined | null;
+
+  @Input()
+  get fnInp(): string | undefined | null {
+    return this.thingInpValue;
+  }
+
+  set fnInp(value: string | undefined | null) {
+    this.thingInpValue = value;
+    this.something(value);
+  }
+
+  thingInpValue: string | undefined | null;
+
+  metaInput: boolean | undefined | null;
+
+  metaOutput = new EventEmitter<boolean>();
+
+  @Output() simpleOut = new EventEmitter<boolean>();
+
+  @Output('reNamedOut') toReNamedOut = new EventEmitter<boolean>();
+
+  constructor(protected readonly elementRef: ElementRef, protected readonly ngZone: NgZone) {
+    addTestOutputTrigger(this, this.elementRef.nativeElement, this.ngZone);
+  }
+
+  ngOnInit() {}
+
+  ngOnChanges(changes: SimpleChanges) {}
+
+  something(val: string | undefined | null) {}
+}
+
+@Component({
+  selector: 'foo',
+  template: '[{{simpleInp}}][{{toReNamedInp}}][{{fnInp}}][{{metaInput}}]{{misc}}',
+  inputs: ['metaInput'],
+  outputs: ['metaOutput'],
+})
+class FooComponent extends BaseTestDirective {}
+
+@Directive({
+  selector: 'foo',
+  // template: '[{{simpleInp}}][{{toReNamedInp}}][{{fnInp}}][{{metaInput}}]{{misc}}',
+  inputs: ['metaInput'],
+  outputs: ['metaOutput'],
+})
+class FooDirective extends BaseTestDirective implements DoCheck {
+  ngDoCheck() {
+    const tplVal = (x: any) => (x === undefined || x === null ? '' : x);
+    this.elementRef.nativeElement.innerHTML = `[${tplVal(this.simpleInp)}][${tplVal(
+      this.toReNamedInp
+    )}][${tplVal(this.fnInp)}][${tplVal(this.metaInput)}]${tplVal((this as any).misc)}`;
+  }
+}
+
+@Directive({ selector: 'simpleInp' })
+class SimpleInpDirective implements OnChanges {
+  @Input() simpleInp: string | undefined | null;
+
+  ngOnChanges(changes: SimpleChanges) {}
+}
 
 describe('StorybookWrapperComponent', () => {
   let rendererService: AbstractRenderer;
@@ -55,6 +138,8 @@ describe('StorybookWrapperComponent', () => {
   let somethingSpy: jest.SpyInstance<void, [string | null | undefined]>;
   let data: Parameters<AbstractRenderer['render']>[0];
 
+  let ngOnChangesDirSpy: jest.SpyInstance<void, [SimpleChanges]>;
+
   const setProps = async (props: typeof data['storyFnAngular']['props']): Promise<void> => {
     data.storyFnAngular.props = props;
     await rendererService.render(data);
@@ -64,11 +149,16 @@ describe('StorybookWrapperComponent', () => {
     data.storyFnAngular.template = template;
   };
 
+  // const testComponent: BaseTestDirective = forwardRef(() => FooComponent) as any;
+  const testComponent = FooComponent;
+
   beforeEach(async () => {
-    ngOnChangesSpy = jest.spyOn(FooComponent.prototype, 'ngOnChanges');
-    ngOnInitSpy = jest.spyOn(FooComponent.prototype, 'ngOnInit');
-    fnInpSetSpy = jest.spyOn(FooComponent.prototype, 'fnInp', 'set');
-    somethingSpy = jest.spyOn(FooComponent.prototype, 'something');
+    ngOnChangesSpy = jest.spyOn(testComponent.prototype, 'ngOnChanges');
+    ngOnInitSpy = jest.spyOn(testComponent.prototype, 'ngOnInit');
+    fnInpSetSpy = jest.spyOn(testComponent.prototype, 'fnInp', 'set');
+    somethingSpy = jest.spyOn(testComponent.prototype, 'something');
+
+    ngOnChangesDirSpy = jest.spyOn(testComponent.prototype, 'ngOnChanges');
 
     root = createRootElement();
     document.body.appendChild(root);
@@ -78,10 +168,13 @@ describe('StorybookWrapperComponent', () => {
     data = {
       storyFnAngular: {
         props: {},
+        // moduleMetadata: {
+        //   declarations: [FooDirDirective],
+        // },
       },
       forced: true,
       parameters: {},
-      component: FooComponent,
+      component: testComponent,
       targetDOMNode: root,
     };
   });
@@ -165,7 +258,7 @@ describe('StorybookWrapperComponent', () => {
           });
         });
 
-        it('should not set when prop does not change', async () => {
+        it('should not set when prop does not change abc1', async () => {
           await setProps({ simpleInp: 'a' });
           await setProps({ simpleInp: 'a' });
           expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
@@ -1550,6 +1643,7 @@ describe('StorybookWrapperComponent', () => {
           await setProps({ simpleInp: 'a' });
           expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
           await setProps({ simpleInp: 'a', isVisible: true });
+          // await setProps({ simpleInp: 'a', isVisible: true });
           expect(getWrapperElement().innerHTML).toBe(
             dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
               "ng-reflect-ng-if": "true"
@@ -1600,6 +1694,16 @@ function emitOutput(outputPropName: string, data: any): void {
   (getWrapperElement().querySelector('foo') as any).__testTrigger(outputPropName, data);
 }
 
+function addTestOutputTrigger(instance: any, nativeElement: any, ngZone: NgZone): void {
+  // eslint-disable-next-line no-underscore-dangle, no-param-reassign
+  nativeElement.__testTrigger = (outputPropName: string, data: any) => {
+    const out = instance[outputPropName];
+    ngZone.run(() => {
+      out.emit(data);
+    });
+  };
+}
+
 // function buildNgReflectBindingStr(propName: string, value: any): string {
 //   // Simple came case to dash case. Doesn't handle all camel case string formats.
 //   const name = !propName
@@ -1622,57 +1726,102 @@ function emitOutput(outputPropName: string, data: any): void {
 //   return `[{{simpleInp}}][{{toReNamedInp}}][{{fnInp}}][{{metaInput}}]{{misc}}`;
 // }
 
-@Component({
-  selector: 'foo',
-  template: '[{{simpleInp}}][{{toReNamedInp}}][{{fnInp}}][{{metaInput}}]{{misc}}',
-  inputs: ['metaInput'],
-  outputs: ['metaOutput'],
-})
-class FooComponent implements OnChanges {
-  @Input() simpleInp: string | undefined | null;
+// @Component({
+//   selector: 'foo',
+//   template: '[{{simpleInp}}][{{toReNamedInp}}][{{fnInp}}][{{metaInput}}]{{misc}}',
+//   inputs: ['metaInput'],
+//   outputs: ['metaOutput'],
+// })
+// class FooComponent implements TestDirective {
+//   @Input() simpleInp: string | undefined | null;
 
-  @Input('reNamedInp') toReNamedInp: string | undefined | null;
+//   @Input('reNamedInp') toReNamedInp: string | undefined | null;
 
-  @Input()
-  get fnInp(): string | undefined | null {
-    return this.thingInpValue;
-  }
+//   @Input()
+//   get fnInp(): string | undefined | null {
+//     return this.thingInpValue;
+//   }
 
-  set fnInp(value: string | undefined | null) {
-    this.thingInpValue = value;
-    this.something(value);
-  }
+//   set fnInp(value: string | undefined | null) {
+//     this.thingInpValue = value;
+//     this.something(value);
+//   }
 
-  thingInpValue: string | undefined | null;
+//   thingInpValue: string | undefined | null;
 
-  metaInput: boolean | undefined | null;
+//   metaInput: boolean | undefined | null;
 
-  metaOutput = new EventEmitter<boolean>();
+//   metaOutput = new EventEmitter<boolean>();
 
-  @Output() simpleOut = new EventEmitter<boolean>();
+//   @Output() simpleOut = new EventEmitter<boolean>();
 
-  @Output('reNamedOut') toReNamedOut = new EventEmitter<boolean>();
+//   @Output('reNamedOut') toReNamedOut = new EventEmitter<boolean>();
 
-  onChangesCount = 0;
+//   constructor(private readonly elementRef: ElementRef, private readonly ngZone: NgZone) {
+//     addTestOutputTrigger(this.elementRef.nativeElement, this.ngZone);
+//   }
 
-  constructor(private readonly elementRef: ElementRef, private readonly ngZone: NgZone) {
-    // eslint-disable-next-line no-underscore-dangle
-    this.elementRef.nativeElement.__testTrigger = (outputPropName: string, data: any) => {
-      const out = (this as any)[outputPropName];
-      this.ngZone.run(() => {
-        out.emit(data);
-      });
-    };
-  }
+//   ngOnInit() {}
 
-  ngOnInit() {}
+//   ngOnChanges(changes: SimpleChanges) {}
 
-  ngOnChanges(changes: SimpleChanges) {
-    this.onChangesCount += 1;
-  }
+//   something(val: string | undefined | null) {}
+// }
 
-  something(val: string | undefined | null) {}
-}
+// @Directive({
+//   selector: 'foo',
+//   // template: '[{{simpleInp}}][{{toReNamedInp}}][{{fnInp}}][{{metaInput}}]{{misc}}',
+//   inputs: ['metaInput'],
+//   outputs: ['metaOutput'],
+// })
+// class FooDirective implements TestDirective {
+//   @Input() simpleInp: string | undefined | null;
+
+//   @Input('reNamedInp') toReNamedInp: string | undefined | null;
+
+//   @Input()
+//   get fnInp(): string | undefined | null {
+//     return this.thingInpValue;
+//   }
+
+//   set fnInp(value: string | undefined | null) {
+//     this.thingInpValue = value;
+//     this.something(value);
+//   }
+
+//   thingInpValue: string | undefined | null;
+
+//   metaInput: boolean | undefined | null;
+
+//   metaOutput = new EventEmitter<boolean>();
+
+//   @Output() simpleOut = new EventEmitter<boolean>();
+
+//   @Output('reNamedOut') toReNamedOut = new EventEmitter<boolean>();
+
+//   constructor(private readonly elementRef: ElementRef, private readonly ngZone: NgZone) {
+//     addTestOutputTrigger(this.elementRef.nativeElement, this.ngZone);
+//   }
+
+//   ngOnInit() {}
+
+//   ngOnChanges(changes: SimpleChanges) {}
+
+//   ngDoCheck() {
+//     this.elementRef.nativeElement.innerHTML = `[${this.simpleInp}][${this.toReNamedInp}][${
+//       this.fnInp
+//     }][${this.metaInput}]${(this as any).misc}`;
+//   }
+
+//   something(val: string | undefined | null) {}
+// }
+
+// @Directive({ selector: 'simpleInp' })
+// class SimpleInpDirective implements OnChanges {
+//   @Input() simpleInp: string | undefined | null;
+
+//   ngOnChanges(changes: SimpleChanges) {}
+// }
 
 function createRootElement(): HTMLElement {
   const root = document.createElement('div');

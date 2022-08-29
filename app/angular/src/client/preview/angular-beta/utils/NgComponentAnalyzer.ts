@@ -145,5 +145,5 @@ export const getComponentDecoratorMetadata = (component: any): Component | undef
     );
   }
 
-  return decorators.find((d) => d instanceof Component);
+  return decorators.find((d) => d instanceof Directive);
 };
