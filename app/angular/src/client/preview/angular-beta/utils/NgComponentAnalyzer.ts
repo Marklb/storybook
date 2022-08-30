@@ -127,7 +127,9 @@ export const getComponentPropsDecoratorMetadata = (component: any) => {
 /**
  * Returns component decorator `@Component`
  */
-export const getComponentDecoratorMetadata = (component: any): Component | undefined => {
+export const getComponentDecoratorMetadata = (
+  component: any
+): Component | Directive | undefined => {
   const decoratorKey = '__annotations__';
   const decorators: any[] =
     Reflect &&
@@ -145,5 +147,5 @@ export const getComponentDecoratorMetadata = (component: any): Component | undef
     );
   }
 
-  return decorators.find((d) => d instanceof Directive);
+  return decorators.find((d) => d instanceof Component || d instanceof Directive);
 };

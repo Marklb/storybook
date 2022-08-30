@@ -14,7 +14,7 @@ import {
   ViewChild,
   ViewContainerRef,
 } from '@angular/core';
-import { Subscription, Subject } from 'rxjs';
+import { Subscription, Subject, Observable } from 'rxjs';
 import { map, skip, tap } from 'rxjs/operators';
 
 import { ICollection } from '../types';
@@ -24,10 +24,15 @@ import { ComponentInputsOutputs, getComponentInputsOutputs } from './utils/NgCom
 
 import { hookChanges } from './utils/LifeCycleHookWatcher';
 
+declare const document: any;
+
 export type StoryWrapper = {
   ngOnInitSubject: Subject<void>;
   ngOnContentCheckedSubject: Subject<void>;
-  registerPropsDirectiveInstance(instance: any): boolean;
+  registerPropsDirectiveInstance(
+    instance: any,
+    fn: (props: ICollection | undefined) => void
+  ): boolean;
   unregisterPropsDirectiveInstance(instance: any): void;
 };
 
@@ -99,10 +104,10 @@ export const createStorybookWrapperComponent = (
 
     private componentInstances: any[] = [];
 
-    @ViewChild(viewChildSelector, { static: true }) storyComponentElementRef: ElementRef;
+    // @ViewChild(viewChildSelector, { static: true }) storyComponentElementRef: ElementRef;
 
-    @ViewChild(viewChildSelector, { read: ViewContainerRef, static: true })
-    storyComponentViewContainerRef: ViewContainerRef;
+    // @ViewChild(viewChildSelector, { read: ViewContainerRef, static: true })
+    // storyComponentViewContainerRef: ViewContainerRef;
 
     // Used in case of a component without selector
     storyComponent = storyComponent ?? '';
@@ -113,24 +118,31 @@ export const createStorybookWrapperComponent = (
 
     // eslint-disable-next-line no-useless-constructor
     constructor(
-      @Inject(STORY_PROPS) private readonly storyProps$: Subject<ICollection | undefined>,
+      @Inject(STORY_PROPS) private readonly storyProps$: Observable<ICollection | undefined>,
       private readonly changeDetectorRef: ChangeDetectorRef,
       private readonly differs: KeyValueDiffers
     ) {
-      console.log(...preLog, 'constructor');
+      console.log(...preLog, 'constructor', document.querySelector('foo')?.innerHTML);
+
+
     }
 
     ngOnInit(): void {
       // console.log('[StorybookWrapperComponent] ngOnInit');
-      console.log(...preLog, 'ngOnInit');
+      console.log(...preLog, 'ngOnInit', document.querySelector('foo')?.innerHTML);
 
       this.ngOnInitSubject.next(undefined);
 
       // Subscribes to the observable storyProps$ to keep these properties up to date
       this.storyWrapperPropsSubscription = this.storyProps$.subscribe((storyProps = {}) => {
-        console.log('[StorybookWrapperComponent] ngOnInit storyProps', storyProps);
+        console.log('[StorybookWrapperComponent] ngOnInit storyProps', storyProps, document.querySelector('foo')?.innerHTML);
         // All props are added as component properties
         Object.assign(this, storyProps);
+
+        // this.componentInstances.forEach((x: any) => {
+        //   // x.instance.changeDetectorRef.markForCheck();
+        //   x.fn(storyProps);
+        // });
 
         // this.changeDetectorRef.detectChanges();
         // this.changeDetectorRef.markForCheck();
@@ -207,8 +219,8 @@ export const createStorybookWrapperComponent = (
     // }
 
     ngOnDestroy(): void {
-      console.log(...preLog, 'ngOnDestroy');
-      
+      console.log(...preLog, 'ngOnDestroy', document.querySelector('foo')?.innerHTML);
+
       if (this.storyComponentPropsSubscription != null) {
         this.storyComponentPropsSubscription.unsubscribe();
       }
@@ -226,28 +238,28 @@ export const createStorybookWrapperComponent = (
     // }
   
     ngOnChanges(changes: SimpleChanges) {
-      console.log(...preLog, 'ngOnChanges', changes);
+      console.log(...preLog, 'ngOnChanges', changes, document.querySelector('foo')?.innerHTML);
     }
   
     ngDoCheck() {
-      console.log(...preLog, 'ngDoCheck');
+      console.log(...preLog, 'ngDoCheck', document.querySelector('foo')?.innerHTML);
     }
   
     ngAfterContentInit() {
-      console.log(...preLog, 'ngAfterContentInit');
+      console.log(...preLog, 'ngAfterContentInit', document.querySelector('foo')?.innerHTML);
     }
   
     ngAfterContentChecked() {
-      console.log(...preLog, 'ngAfterContentChecked');
+      console.log(...preLog, 'ngAfterContentChecked', document.querySelector('foo')?.innerHTML);
       this.ngOnContentCheckedSubject.next(undefined);
     }
   
     ngAfterViewInit() {
-      console.log(...preLog, 'ngAfterViewInit');
+      console.log(...preLog, 'ngAfterViewInit', document.querySelector('foo')?.innerHTML);
     }
   
     ngAfterViewChecked() {
-       console.log(...preLog, 'ngAfterViewChecked');
+       console.log(...preLog, 'ngAfterViewChecked', document.querySelector('foo')?.innerHTML);
     }
   
     // ngOnDestroy() {
@@ -259,9 +271,12 @@ export const createStorybookWrapperComponent = (
      *
      * Returns true if this is the first registered instance.
      */
-    public registerPropsDirectiveInstance(instance: any): boolean {
-      if (this.componentInstances.findIndex((x) => x === instance) === -1) {
-        this.componentInstances.push(instance);
+    public registerPropsDirectiveInstance(
+      instance: any,
+      fn: (props: ICollection | undefined) => void
+    ): boolean {
+      if (this.componentInstances.findIndex((x) => x.instance === instance) === -1) {
+        this.componentInstances.push({ instance, fn });
       }
 
       return this.componentInstances.length === 1;
@@ -271,7 +286,7 @@ export const createStorybookWrapperComponent = (
      * Removes a tracked props directive instance.
      */
     public unregisterPropsDirectiveInstance(instance: any): void {
-      this.componentInstances = this.componentInstances.filter((x) => x !== instance);
+      this.componentInstances = this.componentInstances.filter((x) => x.instance !== instance);
     }
   }
   return StorybookWrapperComponent;

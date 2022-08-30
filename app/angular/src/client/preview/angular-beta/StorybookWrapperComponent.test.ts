@@ -1,4 +1,5 @@
 import {
+  ChangeDetectionStrategy,
   Component,
   Directive,
   DoCheck,
@@ -107,9 +108,17 @@ class BaseTestDirective implements OnInit, OnChanges {
 })
 class FooComponent extends BaseTestDirective {}
 
+@Component({
+  selector: 'foo',
+  template: '[{{simpleInp}}][{{toReNamedInp}}][{{fnInp}}][{{metaInput}}]{{misc}}',
+  inputs: ['metaInput'],
+  outputs: ['metaOutput'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+class FooOnPushComponent extends BaseTestDirective {}
+
 @Directive({
   selector: 'foo',
-  // template: '[{{simpleInp}}][{{toReNamedInp}}][{{fnInp}}][{{metaInput}}]{{misc}}',
   inputs: ['metaInput'],
   outputs: ['metaOutput'],
 })
@@ -129,1562 +138,1588 @@ class SimpleInpDirective implements OnChanges {
   ngOnChanges(changes: SimpleChanges) {}
 }
 
+const commonComponents = [[FooComponent], [FooOnPushComponent], [FooDirective]];
+
 describe('StorybookWrapperComponent', () => {
-  let rendererService: AbstractRenderer;
-  let root: HTMLElement;
-  let ngOnChangesSpy: jest.SpyInstance<void, [SimpleChanges]>;
-  let ngOnInitSpy: jest.SpyInstance<void, []>;
-  let fnInpSetSpy: jest.SpyInstance<void, [string | null | undefined]>;
-  let somethingSpy: jest.SpyInstance<void, [string | null | undefined]>;
-  let data: Parameters<AbstractRenderer['render']>[0];
+  describe.each(commonComponents)('component', (component) => {
+    describe(`Type ${component.name}`, () => {
+      let rendererService: AbstractRenderer;
+      let root: HTMLElement;
+      let ngOnChangesSpy: jest.SpyInstance<void, [SimpleChanges]>;
+      let ngOnInitSpy: jest.SpyInstance<void, []>;
+      let fnInpSetSpy: jest.SpyInstance<void, [string | null | undefined]>;
+      let somethingSpy: jest.SpyInstance<void, [string | null | undefined]>;
+      let data: Parameters<AbstractRenderer['render']>[0];
 
-  let ngOnChangesDirSpy: jest.SpyInstance<void, [SimpleChanges]>;
+      let ngOnChangesDirSpy: jest.SpyInstance<void, [SimpleChanges]>;
 
-  const setProps = async (props: typeof data['storyFnAngular']['props']): Promise<void> => {
-    data.storyFnAngular.props = props;
-    await rendererService.render(data);
-  };
+      const setProps = async (props: typeof data['storyFnAngular']['props']): Promise<void> => {
+        data.storyFnAngular.props = props;
+        await rendererService.render(data);
+      };
 
-  const setTemplate = (template: string): void => {
-    data.storyFnAngular.template = template;
-  };
+      const setTemplate = (template: string): void => {
+        data.storyFnAngular.template = template;
+      };
 
-  // const testComponent: BaseTestDirective = forwardRef(() => FooComponent) as any;
-  const testComponent = FooComponent;
+      // const testComponent: BaseTestDirective = forwardRef(() => FooComponent) as any;
+      // const testComponent = FooOnPushComponent;
 
-  beforeEach(async () => {
-    ngOnChangesSpy = jest.spyOn(testComponent.prototype, 'ngOnChanges');
-    ngOnInitSpy = jest.spyOn(testComponent.prototype, 'ngOnInit');
-    fnInpSetSpy = jest.spyOn(testComponent.prototype, 'fnInp', 'set');
-    somethingSpy = jest.spyOn(testComponent.prototype, 'something');
+      beforeEach(async () => {
+        ngOnChangesSpy = jest.spyOn(component.prototype, 'ngOnChanges');
+        ngOnInitSpy = jest.spyOn(component.prototype, 'ngOnInit');
+        fnInpSetSpy = jest.spyOn(component.prototype, 'fnInp', 'set');
+        somethingSpy = jest.spyOn(component.prototype, 'something');
 
-    ngOnChangesDirSpy = jest.spyOn(testComponent.prototype, 'ngOnChanges');
+        ngOnChangesDirSpy = jest.spyOn(component.prototype, 'ngOnChanges');
 
-    root = createRootElement();
-    document.body.appendChild(root);
-    (platformBrowserDynamic as any).mockImplementation(platformBrowserDynamicTesting);
-    rendererService = new CanvasRenderer('storybook-wrapper');
+        root = createRootElement();
+        document.body.appendChild(root);
+        (platformBrowserDynamic as any).mockImplementation(platformBrowserDynamicTesting);
+        rendererService = new CanvasRenderer('storybook-wrapper');
 
-    data = {
-      storyFnAngular: {
-        props: {},
-        // moduleMetadata: {
-        //   declarations: [FooDirDirective],
-        // },
-      },
-      forced: true,
-      parameters: {},
-      component: testComponent,
-      targetDOMNode: root,
-    };
-  });
+        data = {
+          storyFnAngular: {
+            props: {},
+            // moduleMetadata: {
+            //   declarations: [FooDirDirective],
+            // },
+          },
+          forced: true,
+          parameters: {},
+          component,
+          targetDOMNode: root,
+        };
+      });
 
-  afterEach(() => {
-    jest.clearAllMocks();
+      afterEach(() => {
+        jest.clearAllMocks();
 
-    // Necessary to avoid this error "Provided value for `preserveWhitespaces` can not be changed once it has been set." :
-    // Source: https://github.com/angular/angular/commit/e342ffd855ffeb8af7067b42307ffa320d82177e#diff-92b125e532cc22977b46a91f068d6d7ea81fd61b772842a4a0212f1cfd875be6R28
-    ɵresetJitOptions();
+        // Necessary to avoid this error "Provided value for `preserveWhitespaces` can not be changed once it has been set." :
+        // Source: https://github.com/angular/angular/commit/e342ffd855ffeb8af7067b42307ffa320d82177e#diff-92b125e532cc22977b46a91f068d6d7ea81fd61b772842a4a0212f1cfd875be6R28
+        ɵresetJitOptions();
 
-    document.body.innerHTML = '';
-  });
+        document.body.innerHTML = '';
+      });
 
-  describe('component', () => {
-    describe('simple input', () => {
-      describe('in inital props', () => {
-        it('should set abcf', async () => {
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'a',
-              firstChange: true,
-            }),
+      describe('component', () => {
+        describe('simple input', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'a',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ simpleInp: 'a' });
+              await setProps({ simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'a',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ simpleInp: 'a' });
+              await setProps({ simpleInp: 'b' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-simple-inp="b">[b][][][]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: 'a',
+                  currentValue: 'b',
+                  firstChange: false,
+                }),
+              });
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should set', async () => {
+              await setProps({ simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'a',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ simpleInp: 'a' });
+              await setProps({ simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'a',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ simpleInp: 'a' });
+              await setProps({ simpleInp: 'b' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[b][][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: 'a',
+                  currentValue: 'b',
+                  firstChange: false,
+                }),
+              });
+            });
           });
         });
 
-        it('should not set when prop does not change', async () => {
-          await setProps({ simpleInp: 'a' });
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'a',
-              firstChange: true,
-            }),
+        // //////////
+
+        describe('metadata input', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ metaInput: 'm' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-meta-input="m">[][][][m]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'm',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ metaInput: 'm' });
+              await setProps({ metaInput: 'm' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-meta-input="m">[][][][m]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'm',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ metaInput: 'm' });
+              await setProps({ metaInput: 'n' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-meta-input="n">[][][][n]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: 'm',
+                  currentValue: 'n',
+                  firstChange: false,
+                }),
+              });
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should set', async () => {
+              await setProps({ metaInput: 'm' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'm',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ metaInput: 'm' });
+              await setProps({ metaInput: 'm' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'm',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ metaInput: 'm' });
+              await setProps({ metaInput: 'n' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][n]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: 'm',
+                  currentValue: 'n',
+                  firstChange: false,
+                }),
+              });
+            });
           });
         });
 
-        it('should set when prop changes abc', async () => {
-          await setProps({ simpleInp: 'a' });
-          await setProps({ simpleInp: 'b' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-simple-inp="b">[b][][][]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: 'a',
-              currentValue: 'b',
-              firstChange: false,
-            }),
+        // //////////
+
+        describe('renamed input', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ reNamedInp: 'r' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-to-re-named-inp="r">[][r][][]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'r',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ reNamedInp: 'r' });
+              await setProps({ reNamedInp: 'r' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-to-re-named-inp="r">[][r][][]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'r',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ reNamedInp: 'r' });
+              await setProps({ reNamedInp: 's' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-to-re-named-inp="s">[][s][][]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: 'r',
+                  currentValue: 's',
+                  firstChange: false,
+                }),
+              });
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should set', async () => {
+              await setProps({ reNamedInp: 'r' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'r',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ reNamedInp: 'r' });
+              await setProps({ reNamedInp: 'r' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'r',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ reNamedInp: 'r' });
+              await setProps({ reNamedInp: 's' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][s][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: 'r',
+                  currentValue: 's',
+                  firstChange: false,
+                }),
+              });
+            });
+          });
+        });
+
+        // //////////
+
+        describe('getter/setter input', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ fnInp: 'f' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-fn-inp="f">[][][f][]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'f',
+                  firstChange: true,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(1);
+              expect(somethingSpy).toBeCalledWith('f');
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ fnInp: 'f' });
+              await setProps({ fnInp: 'f' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-fn-inp="f">[][][f][]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'f',
+                  firstChange: true,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(1);
+              expect(somethingSpy).toBeCalledWith('f');
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ fnInp: 'f' });
+              await setProps({ fnInp: 'g' });
+              expect(getWrapperElement().innerHTML).toBe(
+                '<foo ng-reflect-fn-inp="g">[][][g][]</foo><!--container-->'
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: 'f',
+                  currentValue: 'g',
+                  firstChange: false,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(2);
+              expect(somethingSpy).toBeCalledWith('g');
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should set', async () => {
+              await setProps({ fnInp: 'f' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'f',
+                  firstChange: true,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(1);
+              expect(somethingSpy).toBeCalledWith('f');
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ fnInp: 'f' });
+              await setProps({ fnInp: 'f' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'f',
+                  firstChange: true,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(1);
+              expect(somethingSpy).toBeCalledWith('f');
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ fnInp: 'f' });
+              await setProps({ fnInp: 'g' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][g][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: 'f',
+                  currentValue: 'g',
+                  firstChange: false,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(2);
+              expect(somethingSpy).toBeCalledWith('g');
+            });
+          });
+        });
+
+        // //////////
+
+        describe('non-input input', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ misc: 'x' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ misc: 'x' });
+              await setProps({ misc: 'x' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ misc: 'x' });
+              await setProps({ misc: 'y' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should set', async () => {
+              await setProps({ misc: 'x' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ misc: 'x' });
+              await setProps({ misc: 'x' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ misc: 'x' });
+              await setProps({ misc: 'y' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+        });
+
+        // //////////
+
+        describe('simple output', () => {
+          describe('in inital props', () => {
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              await setProps({ simpleOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              await setProps({ simpleOut: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              await setProps({ simpleOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              await setProps({ simpleOut: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+        });
+
+        // //////////
+
+        describe('metadata output', () => {
+          describe('in inital props', () => {
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              await setProps({ metaOutput: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              await setProps({ metaOutput: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              await setProps({ metaOutput: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              await setProps({ metaOutput: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+        });
+
+        // //////////
+
+        describe('renamed output', () => {
+          describe('in inital props', () => {
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              await setProps({ reNamedOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              await setProps({ reNamedOut: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              await setProps({ reNamedOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              await setProps({ reNamedOut: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+        });
+
+        describe('ngOnChanges', () => {
+          it('should call before ngOnInit', async () => {
+            await setProps({ simpleInp: 'a' });
+            expect(ngOnChangesSpy).toBeCalledTimes(1);
+            expect(ngOnChangesSpy).toHaveBeenCalledWith({
+              simpleInp: expect.objectContaining({
+                previousValue: undefined,
+                currentValue: 'a',
+                firstChange: true,
+              }),
+            });
+            expect(ngOnInitSpy).toBeCalledTimes(1);
+            const ngOnChangesOrder = ngOnChangesSpy.mock.invocationCallOrder[0];
+            const ngOnInitOrder = ngOnInitSpy.mock.invocationCallOrder[0];
+            expect(ngOnChangesOrder).toBeLessThan(ngOnInitOrder);
           });
         });
       });
 
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
+      describe('template', () => {
+        beforeEach(() => {
+          data.storyFnAngular.template = `<foo></foo>`;
         });
 
-        it('should set abc', async () => {
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'a',
-              firstChange: true,
-            }),
+        describe('simple input', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'a',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ simpleInp: 'a' });
+              await setProps({ simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'a',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ simpleInp: 'a' });
+              await setProps({ simpleInp: 'b' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[b][][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: 'a',
+                  currentValue: 'b',
+                  firstChange: false,
+                }),
+              });
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should set', async () => {
+              await setProps({ simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'a',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ simpleInp: 'a' });
+              await setProps({ simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'a',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ simpleInp: 'a' });
+              await setProps({ simpleInp: 'b' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[b][][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: 'a',
+                  currentValue: 'b',
+                  firstChange: false,
+                }),
+              });
+            });
           });
         });
 
-        it('should not set when prop does not change abc1', async () => {
-          await setProps({ simpleInp: 'a' });
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'a',
-              firstChange: true,
-            }),
+        // //////////
+
+        describe('metadata input', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ metaInput: 'm' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'm',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ metaInput: 'm' });
+              await setProps({ metaInput: 'm' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'm',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ metaInput: 'm' });
+              await setProps({ metaInput: 'n' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][n]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: 'm',
+                  currentValue: 'n',
+                  firstChange: false,
+                }),
+              });
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should set', async () => {
+              await setProps({ metaInput: 'm' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'm',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ metaInput: 'm' });
+              await setProps({ metaInput: 'm' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'm',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ metaInput: 'm' });
+              await setProps({ metaInput: 'n' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][n]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                metaInput: expect.objectContaining({
+                  previousValue: 'm',
+                  currentValue: 'n',
+                  firstChange: false,
+                }),
+              });
+            });
           });
         });
 
-        it('should set when prop changes', async () => {
-          await setProps({ simpleInp: 'a' });
-          await setProps({ simpleInp: 'b' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[b][][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: 'a',
-              currentValue: 'b',
-              firstChange: false,
-            }),
+        // //////////
+
+        describe('renamed input', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ reNamedInp: 'r' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'r',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ reNamedInp: 'r' });
+              await setProps({ reNamedInp: 'r' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'r',
+                  firstChange: true,
+                }),
+              });
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ reNamedInp: 'r' });
+              await setProps({ reNamedInp: 's' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][s][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: 'r',
+                  currentValue: 's',
+                  firstChange: false,
+                }),
+              });
+            });
           });
-        });
-      });
-    });
 
-    // //////////
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
 
-    describe('metadata input', () => {
-      describe('in inital props', () => {
-        it('should set', async () => {
-          await setProps({ metaInput: 'm' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-meta-input="m">[][][][m]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'm',
-              firstChange: true,
-            }),
-          });
-        });
+            it('should set', async () => {
+              await setProps({ reNamedInp: 'r' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'r',
+                  firstChange: true,
+                }),
+              });
+            });
 
-        it('should not set when prop does not change', async () => {
-          await setProps({ metaInput: 'm' });
-          await setProps({ metaInput: 'm' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-meta-input="m">[][][][m]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'm',
-              firstChange: true,
-            }),
-          });
-        });
+            it('should not set when prop does not change', async () => {
+              await setProps({ reNamedInp: 'r' });
+              await setProps({ reNamedInp: 'r' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'r',
+                  firstChange: true,
+                }),
+              });
+            });
 
-        it('should set when prop changes', async () => {
-          await setProps({ metaInput: 'm' });
-          await setProps({ metaInput: 'n' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-meta-input="n">[][][][n]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: 'm',
-              currentValue: 'n',
-              firstChange: false,
-            }),
-          });
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should set', async () => {
-          await setProps({ metaInput: 'm' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'm',
-              firstChange: true,
-            }),
-          });
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ metaInput: 'm' });
-          await setProps({ metaInput: 'm' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'm',
-              firstChange: true,
-            }),
+            it('should set when prop changes', async () => {
+              await setProps({ reNamedInp: 'r' });
+              await setProps({ reNamedInp: 's' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][s][][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                toReNamedInp: expect.objectContaining({
+                  previousValue: 'r',
+                  currentValue: 's',
+                  firstChange: false,
+                }),
+              });
+            });
           });
         });
 
-        it('should set when prop changes', async () => {
-          await setProps({ metaInput: 'm' });
-          await setProps({ metaInput: 'n' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][n]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: 'm',
-              currentValue: 'n',
-              firstChange: false,
-            }),
+        // //////////
+
+        describe('getter/setter input', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ fnInp: 'f' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'f',
+                  firstChange: true,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(1);
+              expect(somethingSpy).toBeCalledWith('f');
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ fnInp: 'f' });
+              await setProps({ fnInp: 'f' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'f',
+                  firstChange: true,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(1);
+              expect(somethingSpy).toBeCalledWith('f');
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ fnInp: 'f' });
+              await setProps({ fnInp: 'g' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][g][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: 'f',
+                  currentValue: 'g',
+                  firstChange: false,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(2);
+              expect(somethingSpy).toBeCalledWith('g');
+            });
           });
-        });
-      });
-    });
 
-    // //////////
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
 
-    describe('renamed input', () => {
-      describe('in inital props', () => {
-        it('should set', async () => {
-          await setProps({ reNamedInp: 'r' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-to-re-named-inp="r">[][r][][]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'r',
-              firstChange: true,
-            }),
-          });
-        });
+            it('should set', async () => {
+              await setProps({ fnInp: 'f' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'f',
+                  firstChange: true,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(1);
+              expect(somethingSpy).toBeCalledWith('f');
+            });
 
-        it('should not set when prop does not change', async () => {
-          await setProps({ reNamedInp: 'r' });
-          await setProps({ reNamedInp: 'r' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-to-re-named-inp="r">[][r][][]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'r',
-              firstChange: true,
-            }),
-          });
-        });
+            it('should not set when prop does not change', async () => {
+              await setProps({ fnInp: 'f' });
+              await setProps({ fnInp: 'f' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'f',
+                  firstChange: true,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(1);
+              expect(somethingSpy).toBeCalledWith('f');
+            });
 
-        it('should set when prop changes', async () => {
-          await setProps({ reNamedInp: 'r' });
-          await setProps({ reNamedInp: 's' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-to-re-named-inp="s">[][s][][]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: 'r',
-              currentValue: 's',
-              firstChange: false,
-            }),
-          });
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should set', async () => {
-          await setProps({ reNamedInp: 'r' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'r',
-              firstChange: true,
-            }),
-          });
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ reNamedInp: 'r' });
-          await setProps({ reNamedInp: 'r' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'r',
-              firstChange: true,
-            }),
-          });
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ reNamedInp: 'r' });
-          await setProps({ reNamedInp: 's' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][s][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: 'r',
-              currentValue: 's',
-              firstChange: false,
-            }),
-          });
-        });
-      });
-    });
-
-    // //////////
-
-    describe('getter/setter input', () => {
-      describe('in inital props', () => {
-        it('should set', async () => {
-          await setProps({ fnInp: 'f' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-fn-inp="f">[][][f][]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'f',
-              firstChange: true,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(1);
-          expect(somethingSpy).toBeCalledWith('f');
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ fnInp: 'f' });
-          await setProps({ fnInp: 'f' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-fn-inp="f">[][][f][]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'f',
-              firstChange: true,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(1);
-          expect(somethingSpy).toBeCalledWith('f');
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ fnInp: 'f' });
-          await setProps({ fnInp: 'g' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo ng-reflect-fn-inp="g">[][][g][]</foo><!--container-->'
-          );
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: 'f',
-              currentValue: 'g',
-              firstChange: false,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(2);
-          expect(somethingSpy).toBeCalledWith('g');
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should set', async () => {
-          await setProps({ fnInp: 'f' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'f',
-              firstChange: true,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(1);
-          expect(somethingSpy).toBeCalledWith('f');
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ fnInp: 'f' });
-          await setProps({ fnInp: 'f' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'f',
-              firstChange: true,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(1);
-          expect(somethingSpy).toBeCalledWith('f');
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ fnInp: 'f' });
-          await setProps({ fnInp: 'g' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][g][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: 'f',
-              currentValue: 'g',
-              firstChange: false,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(2);
-          expect(somethingSpy).toBeCalledWith('g');
-        });
-      });
-    });
-
-    // //////////
-
-    describe('non-input input', () => {
-      describe('in inital props', () => {
-        it('should set', async () => {
-          await setProps({ misc: 'x' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ misc: 'x' });
-          await setProps({ misc: 'x' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ misc: 'x' });
-          await setProps({ misc: 'y' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should set', async () => {
-          await setProps({ misc: 'x' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ misc: 'x' });
-          await setProps({ misc: 'x' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ misc: 'x' });
-          await setProps({ misc: 'y' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-    });
-
-    // //////////
-
-    describe('simple output', () => {
-      describe('in inital props', () => {
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          await setProps({ simpleOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          await setProps({ simpleOut: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          await setProps({ simpleOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          await setProps({ simpleOut: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-    });
-
-    // //////////
-
-    describe('metadata output', () => {
-      describe('in inital props', () => {
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          await setProps({ metaOutput: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          await setProps({ metaOutput: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          await setProps({ metaOutput: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          await setProps({ metaOutput: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-    });
-
-    // //////////
-
-    describe('renamed output', () => {
-      describe('in inital props', () => {
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          await setProps({ reNamedOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          await setProps({ reNamedOut: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          await setProps({ reNamedOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          await setProps({ reNamedOut: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-    });
-  });
-
-  describe('template', () => {
-    beforeEach(() => {
-      data.storyFnAngular.template = `<foo></foo>`;
-    });
-
-    describe('simple input', () => {
-      describe('in inital props', () => {
-        it('should set', async () => {
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'a',
-              firstChange: true,
-            }),
+            it('should set when prop changes', async () => {
+              await setProps({ fnInp: 'f' });
+              await setProps({ fnInp: 'g' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][g][]</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                fnInp: expect.objectContaining({
+                  previousValue: 'f',
+                  currentValue: 'g',
+                  firstChange: false,
+                }),
+              });
+              expect(somethingSpy).toBeCalledTimes(2);
+              expect(somethingSpy).toBeCalledWith('g');
+            });
           });
         });
 
-        it('should not set when prop does not change', async () => {
-          await setProps({ simpleInp: 'a' });
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'a',
-              firstChange: true,
-            }),
+        // //////////
+
+        describe('non-input props', () => {
+          describe('in inital props', () => {
+            it('should set', async () => {
+              await setProps({ misc: 'x' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ misc: 'x' });
+              await setProps({ misc: 'x' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ misc: 'x' });
+              await setProps({ misc: 'y' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should set', async () => {
+              await setProps({ misc: 'x' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not set when prop does not change', async () => {
+              await setProps({ misc: 'x' });
+              await setProps({ misc: 'x' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should set when prop changes', async () => {
+              await setProps({ misc: 'x' });
+              await setProps({ misc: 'y' });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
           });
         });
 
-        it('should set when prop changes', async () => {
-          await setProps({ simpleInp: 'a' });
-          await setProps({ simpleInp: 'b' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[b][][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: 'a',
-              currentValue: 'b',
-              firstChange: false,
-            }),
+        // //////////
+
+        describe('simple output', () => {
+          describe('in inital props', () => {
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              await setProps({ simpleOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              await setProps({ simpleOut: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
           });
-        });
-      });
 
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
 
-        it('should set', async () => {
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'a',
-              firstChange: true,
-            }),
-          });
-        });
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
 
-        it('should not set when prop does not change', async () => {
-          await setProps({ simpleInp: 'a' });
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'a',
-              firstChange: true,
-            }),
-          });
-        });
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              await setProps({ simpleOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
 
-        it('should set when prop changes', async () => {
-          await setProps({ simpleInp: 'a' });
-          await setProps({ simpleInp: 'b' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[b][][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            simpleInp: expect.objectContaining({
-              previousValue: 'a',
-              currentValue: 'b',
-              firstChange: false,
-            }),
-          });
-        });
-      });
-    });
-
-    // //////////
-
-    describe('metadata input', () => {
-      describe('in inital props', () => {
-        it('should set', async () => {
-          await setProps({ metaInput: 'm' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'm',
-              firstChange: true,
-            }),
-          });
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ metaInput: 'm' });
-          await setProps({ metaInput: 'm' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'm',
-              firstChange: true,
-            }),
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy });
+              await setProps({ simpleOut: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
           });
         });
 
-        it('should set when prop changes', async () => {
-          await setProps({ metaInput: 'm' });
-          await setProps({ metaInput: 'n' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][n]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: 'm',
-              currentValue: 'n',
-              firstChange: false,
-            }),
+        // //////////
+
+        describe('metadata output', () => {
+          describe('in inital props', () => {
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              await setProps({ metaOutput: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              await setProps({ metaOutput: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              await setProps({ metaOutput: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ metaOutput: outSpy });
+              await setProps({ metaOutput: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('metaOutput', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+        });
+
+        // //////////
+
+        describe('renamed output', () => {
+          describe('in inital props', () => {
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              await setProps({ reNamedOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              await setProps({ reNamedOut: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+          });
+
+          describe('not in inital props', () => {
+            beforeEach(async () => {
+              await setProps({});
+            });
+
+            it('should emit', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should not subscribe again when prop does not change', async () => {
+              const outSpy = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              await setProps({ reNamedOut: outSpy });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(1);
+              expect(outSpy).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+            });
+
+            it('should unsubscribe previous when prop changes', async () => {
+              const outSpy = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ reNamedOut: outSpy });
+              await setProps({ reNamedOut: outSpy2 });
+              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              const eventData = { a: 'b' };
+              emitOutput('toReNamedOut', eventData);
+              expect(outSpy).toBeCalledTimes(0);
+
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
+
+            });
+          });
+        });
+
+        // //////////
+
+        describe('ngOnChanges', () => {
+          it('should call before ngOnInit', async () => {
+            await setProps({ simpleInp: 'a' });
+            expect(ngOnChangesSpy).toBeCalledTimes(1);
+            expect(ngOnChangesSpy).toHaveBeenCalledWith({
+              simpleInp: expect.objectContaining({
+                previousValue: undefined,
+                currentValue: 'a',
+                firstChange: true,
+              }),
+            });
+            expect(ngOnInitSpy).toBeCalledTimes(1);
+            const ngOnChangesOrder = ngOnChangesSpy.mock.invocationCallOrder[0];
+            const ngOnInitOrder = ngOnInitSpy.mock.invocationCallOrder[0];
+            expect(ngOnChangesOrder).toBeLessThan(ngOnInitOrder);
           });
         });
       });
 
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
+      // describe('component initially not rendered in template', () => {
+      //   beforeEach(() => {
+      //     data.storyFnAngular.template = `<ng-container *ngIf="isVisible"><foo></foo></ng-container>`;
+      //   });
 
-        it('should set', async () => {
-          await setProps({ metaInput: 'm' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'm',
-              firstChange: true,
-            }),
-          });
-        });
+      //   describe('with input prop', () => {
+      //     describe('in initial props', () => {
+      //       it('should render', async () => {
+      //         await setProps({ simpleInp: 'a' });
+      //         expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
+      //         await setProps({ simpleInp: 'a', isVisible: true });
+      //         // await setProps({ simpleInp: 'a', isVisible: true });
+      //         expect(getWrapperElement().innerHTML).toBe(
+      //           dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
+      //             "ng-reflect-ng-if": "true"
+      //           }-->`
+      //         );
+      //       });
+      //     });
 
-        it('should not set when prop does not change', async () => {
-          await setProps({ metaInput: 'm' });
-          await setProps({ metaInput: 'm' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'm',
-              firstChange: true,
-            }),
-          });
-        });
+      //     describe('not in initial props', () => {
+      //       it('should render', async () => {
+      //         await setProps({});
+      //         expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
+      //         await setProps({ isVisible: true, simpleInp: 'a' });
+      //         expect(getWrapperElement().innerHTML).toBe(
+      //           dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
+      //             "ng-reflect-ng-if": "true"
+      //           }-->`
+      //         );
+      //       });
+      //     });
+      //   });
+      // });
 
-        it('should set when prop changes', async () => {
-          await setProps({ metaInput: 'm' });
-          await setProps({ metaInput: 'n' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][n]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            metaInput: expect.objectContaining({
-              previousValue: 'm',
-              currentValue: 'n',
-              firstChange: false,
-            }),
-          });
-        });
-      });
-    });
+      // describe('multiple instances of component', () => {
+      //   beforeEach(() => {
+      //     data.storyFnAngular.template = `<foo></foo><foo></foo>`;
+      //   });
 
-    // //////////
+      //   it('should set props on all instances', async () => {
+      //     await setProps({ simpleInp: 'a' });
+      //     expect(getWrapperElement().innerHTML).toBe(
+      //       '<foo>[a][][][]</foo><!--container--><foo>[a][][][]</foo><!--container-->'
+      //     );
+      //   });
 
-    describe('renamed input', () => {
-      describe('in inital props', () => {
-        it('should set', async () => {
-          await setProps({ reNamedInp: 'r' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'r',
-              firstChange: true,
-            }),
-          });
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ reNamedInp: 'r' });
-          await setProps({ reNamedInp: 'r' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'r',
-              firstChange: true,
-            }),
-          });
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ reNamedInp: 'r' });
-          await setProps({ reNamedInp: 's' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][s][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: 'r',
-              currentValue: 's',
-              firstChange: false,
-            }),
-          });
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should set', async () => {
-          await setProps({ reNamedInp: 'r' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'r',
-              firstChange: true,
-            }),
-          });
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ reNamedInp: 'r' });
-          await setProps({ reNamedInp: 'r' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'r',
-              firstChange: true,
-            }),
-          });
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ reNamedInp: 'r' });
-          await setProps({ reNamedInp: 's' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][s][][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            toReNamedInp: expect.objectContaining({
-              previousValue: 'r',
-              currentValue: 's',
-              firstChange: false,
-            }),
-          });
-        });
-      });
-    });
-
-    // //////////
-
-    describe('getter/setter input', () => {
-      describe('in inital props', () => {
-        it('should set', async () => {
-          await setProps({ fnInp: 'f' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'f',
-              firstChange: true,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(1);
-          expect(somethingSpy).toBeCalledWith('f');
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ fnInp: 'f' });
-          await setProps({ fnInp: 'f' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'f',
-              firstChange: true,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(1);
-          expect(somethingSpy).toBeCalledWith('f');
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ fnInp: 'f' });
-          await setProps({ fnInp: 'g' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][g][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: 'f',
-              currentValue: 'g',
-              firstChange: false,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(2);
-          expect(somethingSpy).toBeCalledWith('g');
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should set', async () => {
-          await setProps({ fnInp: 'f' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'f',
-              firstChange: true,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(1);
-          expect(somethingSpy).toBeCalledWith('f');
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ fnInp: 'f' });
-          await setProps({ fnInp: 'f' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(1);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: undefined,
-              currentValue: 'f',
-              firstChange: true,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(1);
-          expect(somethingSpy).toBeCalledWith('f');
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ fnInp: 'f' });
-          await setProps({ fnInp: 'g' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][g][]</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(2);
-          expect(ngOnChangesSpy).toHaveBeenCalledWith({
-            fnInp: expect.objectContaining({
-              previousValue: 'f',
-              currentValue: 'g',
-              firstChange: false,
-            }),
-          });
-          expect(somethingSpy).toBeCalledTimes(2);
-          expect(somethingSpy).toBeCalledWith('g');
-        });
-      });
-    });
-
-    // //////////
-
-    describe('non-input props', () => {
-      describe('in inital props', () => {
-        it('should set', async () => {
-          await setProps({ misc: 'x' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ misc: 'x' });
-          await setProps({ misc: 'x' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ misc: 'x' });
-          await setProps({ misc: 'y' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should set', async () => {
-          await setProps({ misc: 'x' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not set when prop does not change', async () => {
-          await setProps({ misc: 'x' });
-          await setProps({ misc: 'x' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should set when prop changes', async () => {
-          await setProps({ misc: 'x' });
-          await setProps({ misc: 'y' });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-    });
-
-    // //////////
-
-    describe('simple output', () => {
-      describe('in inital props', () => {
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          await setProps({ simpleOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          await setProps({ simpleOut: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          await setProps({ simpleOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ simpleOut: outSpy });
-          await setProps({ simpleOut: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('simpleOut', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-    });
-
-    // //////////
-
-    describe('metadata output', () => {
-      describe('in inital props', () => {
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          await setProps({ metaOutput: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          await setProps({ metaOutput: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          await setProps({ metaOutput: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ metaOutput: outSpy });
-          await setProps({ metaOutput: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('metaOutput', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-    });
-
-    // //////////
-
-    describe('renamed output', () => {
-      describe('in inital props', () => {
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          await setProps({ reNamedOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          await setProps({ reNamedOut: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-
-      describe('not in inital props', () => {
-        beforeEach(async () => {
-          await setProps({});
-        });
-
-        it('should emit', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should not subscribe again when prop does not change', async () => {
-          const outSpy = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          await setProps({ reNamedOut: outSpy });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(1);
-          expect(outSpy).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-
-        it('should unsubscribe previous when prop changes', async () => {
-          const outSpy = createOutputPropSpy();
-          const outSpy2 = createOutputPropSpy();
-          await setProps({ reNamedOut: outSpy });
-          await setProps({ reNamedOut: outSpy2 });
-          expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-          const eventData = { a: 'b' };
-          emitOutput('toReNamedOut', eventData);
-          expect(outSpy).toBeCalledTimes(0);
-          expect(outSpy2).toBeCalledTimes(1);
-          expect(outSpy2).toBeCalledWith(eventData);
-          expect(ngOnChangesSpy).toBeCalledTimes(0);
-        });
-      });
-    });
-
-    // //////////
-
-    describe('ngOnChanges', () => {
-      it('should call before ngOnInit', async () => {
-        await setProps({ simpleInp: 'a' });
-        expect(ngOnChangesSpy).toBeCalledTimes(1);
-        expect(ngOnChangesSpy).toHaveBeenCalledWith({
-          simpleInp: expect.objectContaining({
-            previousValue: undefined,
-            currentValue: 'a',
-            firstChange: true,
-          }),
-        });
-        expect(ngOnInitSpy).toBeCalledTimes(1);
-        const ngOnChangesOrder = ngOnChangesSpy.mock.invocationCallOrder[0];
-        const ngOnInitOrder = ngOnInitSpy.mock.invocationCallOrder[0];
-        expect(ngOnChangesOrder).toBeLessThan(ngOnInitOrder);
-      });
-    });
-  });
-
-  describe('component initially not rendered in template', () => {
-    beforeEach(() => {
-      data.storyFnAngular.template = `<ng-container *ngIf="isVisible"><foo></foo></ng-container>`;
-    });
-
-    describe('with input prop', () => {
-      describe('in initial props', () => {
-        it('should render', async () => {
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
-          await setProps({ simpleInp: 'a', isVisible: true });
-          // await setProps({ simpleInp: 'a', isVisible: true });
-          expect(getWrapperElement().innerHTML).toBe(
-            dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
-              "ng-reflect-ng-if": "true"
-            }-->`
-          );
-        });
-      });
-
-      describe('not in initial props', () => {
-        it('should render', async () => {
-          await setProps({});
-          expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
-          await setProps({ isVisible: true, simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe(
-            dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
-              "ng-reflect-ng-if": "true"
-            }-->`
-          );
-        });
-      });
-    });
-  });
-
-  describe('multiple instances of component', () => {
-    beforeEach(() => {
-      data.storyFnAngular.template = `<foo></foo><foo></foo>`;
-    });
-
-    it('should set props on all instances', async () => {
-      await setProps({ simpleInp: 'a' });
-      expect(getWrapperElement().innerHTML).toBe(
-        '<foo>[a][][][]</foo><!--container--><foo>[a][][][]</foo><!--container-->'
-      );
-    });
-
-    it('should set props on first instance', async () => {
-      data.parameters.setPropsOnAllComponentInstances = false;
-      await setProps({ simpleInp: 'a' });
-      expect(getWrapperElement().innerHTML).toBe(
-        '<foo>[a][][][]</foo><!--container--><foo>[][][][]</foo><!--container-->'
-      );
+      //   it('should set props on first instance', async () => {
+      //     data.parameters.setPropsOnAllComponentInstances = false;
+      //     await setProps({ simpleInp: 'a' });
+      //     expect(getWrapperElement().innerHTML).toBe(
+      //       '<foo>[a][][][]</foo><!--container--><foo>[][][][]</foo><!--container-->'
+      //     );
+      //   });
+      // });
     });
   });
 });

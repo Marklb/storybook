@@ -1,6 +1,8 @@
 import {
   AfterViewInit,
+  ChangeDetectionStrategy,
   ChangeDetectorRef,
+  Component,
   ComponentRef,
   Directive,
   ElementRef,
@@ -50,6 +52,8 @@ import {
   LifeCycleHooksLog,
   setCalledNgOnChanges,
 } from './utils/LifeCycleHookWatcher';
+
+declare const document: any;
 
 /**
  * Return reference to internal EMPTY_OBJ. It is not exported and I did not see
@@ -135,6 +139,10 @@ export const createStorybookWrapperDirective = (
   const ngComponentMetadata = getComponentDecoratorMetadata(storyComponent);
   const ngComponentInputsOutputs = getComponentInputsOutputs(storyComponent);
 
+  const isUsingOnPush =
+    ngComponentMetadata instanceof Component &&
+    ngComponentMetadata.changeDetection === ChangeDetectionStrategy.OnPush;
+
   const isRecord = (record: ComponentIORecord, name: string): boolean =>
     record.templateName === name;
 
@@ -187,8 +195,10 @@ export const createStorybookWrapperDirective = (
 
     private propsToSet: ICollection | undefined;
 
+    private updatedProp = false;
+
     constructor(
-      @Inject(STORY_PROPS) private readonly storyProps$: Subject<ICollection | undefined>,
+      @Inject(STORY_PROPS) private readonly storyProps$: Observable<ICollection | undefined>,
       // @Inject(STORY) private story$: Observable<StoryFnAngularReturnType>,
       @Inject(STORY_WRAPPER) private readonly storyWrapper: StoryWrapper,
       @Inject(STORY_PARAMETERS) private readonly storyParameters: Parameters,
@@ -201,23 +211,33 @@ export const createStorybookWrapperDirective = (
       @Optional() @SkipSelf() private readonly sbPropsDir?: StorybookPropsDirective,
       @Optional() @Self() @Inject(storyComponent) readonly componentInstance?: any
     ) {
-      console.log(...preLog, 'constructor');
+      console.log(...preLog, 'constructor', document.querySelector('foo')?.innerHTML);
 
       this.startPropsUpdating();
 
-      this.setPropsEnabled = this.storyWrapper.registerPropsDirectiveInstance(this);
+      this.setPropsEnabled = this.storyWrapper.registerPropsDirectiveInstance(this, (props) => {
+        console.log('props', props);
+        if (isUsingOnPush && props) {
+          this.setProps(this.getInstance(), props, null);
+          // this.propsToSet = null;
+          // this.changeDetectorRef.markForCheck();
+          // this.outlet.ngComponentOutletInjector.get(ChangeDetectorRef).detectChanges();
+        }
+      });
       // this.startPropsUpdating();
 
-      this.storyWrapper.ngOnInitSubject.subscribe(() => {
-        console.log('ngOnInitSubject');
-        // this.startPropsUpdating();
-      });
+      // this.storyWrapper.ngOnInitSubject.subscribe(() => {
+      //   console.log('ngOnInitSubject', document.querySelector('foo')?.innerHTML);
+      //   // this.startPropsUpdating();
+      // });
 
       this.storyWrapper.ngOnContentCheckedSubject.subscribe(() => {
-        console.log('ngOnContentCheckedSubject');
-        if (this.propsToSet) {
+        console.log('ngOnContentCheckedSubject', document.querySelector('foo')?.innerHTML);
+        if (!isUsingOnPush && this.propsToSet) {
           this.setProps(this.getInstance(), this.propsToSet, null);
           this.propsToSet = null;
+          // this.changeDetectorRef.markForCheck();
+          // this.outlet.ngComponentOutletInjector.get(ChangeDetectorRef).detectChanges();
         }
         setCalledNgOnChanges(this.getInstance(), false);
       });
@@ -225,7 +245,7 @@ export const createStorybookWrapperDirective = (
 
     ngOnInit(): void {
       // console.log('[StorybookPropsDirective] ngOnInit');
-      console.log(...preLog, 'ngOnInit');
+      console.log(...preLog, 'ngOnInit', document.querySelector('foo')?.innerHTML);
 
       const directives = this.injector.get(
         Directive,
@@ -237,31 +257,41 @@ export const createStorybookWrapperDirective = (
     }
 
     ngOnChanges(changes: SimpleChanges) {
-      console.log(...preLog, 'ngOnChanges', changes);
+      console.log(...preLog, 'ngOnChanges', changes, document.querySelector('foo')?.innerHTML);
     }
 
     ngDoCheck() {
-      console.log(...preLog, 'ngDoCheck');
+      console.log(...preLog, 'ngDoCheck', document.querySelector('foo')?.innerHTML);
+      if (this.updatedProp) {
+        // this.outlet.ngComponentOutletInjector.get(ChangeDetectorRef).markForCheck();
+        // this.changeDetectorRef.detectChanges();
+        this.updatedProp = false;
+      }
     }
 
     ngAfterContentInit() {
-      console.log(...preLog, 'ngAfterContentInit');
+      console.log(...preLog, 'ngAfterContentInit', document.querySelector('foo')?.innerHTML);
     }
 
     ngAfterContentChecked() {
-      console.log(...preLog, 'ngAfterContentChecked');
+      console.log(...preLog, 'ngAfterContentChecked', document.querySelector('foo')?.innerHTML);
+      if (isUsingOnPush) {
+        this.changeDetectorRef.detectChanges();
+      }
     }
 
     ngAfterViewInit() {
-      console.log(...preLog, 'ngAfterViewInit');
+      console.log(...preLog, 'ngAfterViewInit', document.querySelector('foo')?.innerHTML);
+      // this.outlet.ngComponentOutletInjector.get(ChangeDetectorRef).detectChanges();
+      // this.outlet.ngComponentOutletInjector.get(ChangeDetectorRef).markForCheck();
     }
 
     ngAfterViewChecked() {
-      console.log(...preLog, 'ngAfterViewChecked');
+      console.log(...preLog, 'ngAfterViewChecked', document.querySelector('foo')?.innerHTML);
     }
 
     ngOnDestroy(): void {
-      console.log(...preLog, 'ngOnDestroy');
+      console.log(...preLog, 'ngOnDestroy', document.querySelector('foo')?.innerHTML);
       if (this.subscription) {
         this.subscription.unsubscribe();
       }
@@ -290,6 +320,15 @@ export const createStorybookWrapperDirective = (
         this.subscription = this.storyProps$.subscribe((storyProps = {}) => {
           console.log('[StorybookPropsDirective] storyProps$', storyProps);
           this.propsToSet = storyProps;
+          // this.changeDetectorRef.detectChanges();
+          // this.changeDetectorRef.markForCheck();
+          if (isUsingOnPush && this.propsToSet) {
+            this.setProps(this.getInstance(), this.propsToSet, null);
+            this.propsToSet = null;
+          }
+          // if (isUsingOnPush) {
+          //   this.changeDetectorRef.markForCheck();
+          // }
         });
       }
     }
@@ -328,6 +367,11 @@ export const createStorybookWrapperDirective = (
           } else {
             // eslint-disable-next-line no-param-reassign
             instance[instancePropName] = value;
+            this.updatedProp = true;
+            if (isUsingOnPush) {
+              this.changeDetectorRef.markForCheck();
+              // this.outlet.ngComponentOutletInjector.get(ChangeDetectorRef).markForCheck();
+            }
           }
 
           this.previousValues[key] = value;
