@@ -7,6 +7,7 @@ import {
   EventEmitter,
   forwardRef,
   getPlatform,
+  Injector,
   Input,
   NgZone,
   OnChanges,
@@ -22,6 +23,7 @@ import dedent from 'ts-dedent';
 
 import { CanvasRenderer } from './CanvasRenderer';
 import { AbstractRenderer } from './AbstractRenderer';
+import { STORY_PROPS_DIRECTIVE } from './StorybookPropsDirective';
 
 jest.mock('@angular/platform-browser-dynamic');
 
@@ -50,6 +52,10 @@ declare const document: Document;
 // template binding can't be removed?
 //
 // TODO: Test that inputs/outputs/ngOnChanges work with inheritance.
+//
+// TODO: Try to support pipes.
+//   - Allow as the component and use it on an empty template ex: `{{ prop | <pipe-selector> }}`.
+//   - Allow applying pipes by specifying in args.
 
 // interface TestDirective extends OnInit, OnChanges {
 //   simpleInp: string | undefined | null;
@@ -62,6 +68,17 @@ declare const document: Document;
 //   toReNamedOut: EventEmitter<boolean>;
 //   something(val: string | undefined | null): void;
 // }
+
+const TEST_INSTANCE_REF: unique symbol = Symbol('__test_instance_ref__');
+
+function getPropsDirectiveInstance(nativeElement: any) {
+  const ref: any = nativeElement[TEST_INSTANCE_REF];
+  if (!ref) {
+    return null;
+  }
+  const instance = ref.injector.get(STORY_PROPS_DIRECTIVE);
+  return instance;
+}
 
 @Directive()
 class BaseTestDirective implements OnInit, OnChanges {
@@ -89,7 +106,12 @@ class BaseTestDirective implements OnInit, OnChanges {
 
   @Output('reNamedOut') toReNamedOut = new EventEmitter<boolean>();
 
-  constructor(protected readonly elementRef: ElementRef, protected readonly ngZone: NgZone) {
+  constructor(
+    protected readonly elementRef: ElementRef,
+    protected readonly ngZone: NgZone,
+    public readonly injector: Injector
+  ) {
+    this.elementRef.nativeElement[TEST_INSTANCE_REF] = this;
     addTestOutputTrigger(this, this.elementRef.nativeElement, this.ngZone);
   }
 
@@ -131,6 +153,13 @@ class FooDirective extends BaseTestDirective implements DoCheck {
   }
 }
 
+@Component({
+  template: '[{{simpleInp}}][{{toReNamedInp}}][{{fnInp}}][{{metaInput}}]{{misc}}',
+  inputs: ['metaInput'],
+  outputs: ['metaOutput'],
+})
+class NoSelectorComponent extends BaseTestDirective {}
+
 @Directive({ selector: 'simpleInp' })
 class SimpleInpDirective implements OnChanges {
   @Input() simpleInp: string | undefined | null;
@@ -138,10 +167,15 @@ class SimpleInpDirective implements OnChanges {
   ngOnChanges(changes: SimpleChanges) {}
 }
 
-const commonComponents = [[FooComponent], [FooOnPushComponent], [FooDirective]];
+const commonComponents = [
+  [FooComponent],
+  [FooOnPushComponent],
+  [FooDirective],
+  // [NoSelectorComponent],
+];
 
 describe('StorybookWrapperComponent', () => {
-  describe.each(commonComponents)('component', (component) => {
+  describe.each(commonComponents)('Base', (component) => {
     describe(`Type ${component.name}`, () => {
       let rendererService: AbstractRenderer;
       let root: HTMLElement;
@@ -940,11 +974,21 @@ describe('StorybookWrapperComponent', () => {
             expect(ngOnChangesOrder).toBeLessThan(ngOnInitOrder);
           });
         });
+
+        describe('bindings', () => {
+          it('should know bound inputs and outputs', async () => {
+            await setProps({ simpleInp: 'a', simpleOut: () => {} });
+            const inst = getPropsDirectiveInstance(getWrapperElement().querySelector('foo')!);
+            expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
+            expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
+            expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
+          });
+        });
       });
 
       describe('template', () => {
         beforeEach(() => {
-          data.storyFnAngular.template = `<foo></foo>`;
+          setTemplate(`<foo></foo>`);
         });
 
         describe('simple input', () => {
@@ -987,6 +1031,40 @@ describe('StorybookWrapperComponent', () => {
                   currentValue: 'b',
                   firstChange: false,
                 }),
+              });
+            });
+
+            describe('manual binding', () => {
+              it('without brackets', async () => {
+                setTemplate(`<foo simpleInp="a"></foo>`);
+                await setProps({ simpleInp: 'b' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  '<foo simpleinp="a" ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  simpleInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'a',
+                    firstChange: true,
+                  }),
+                });
+              });
+
+              it('with brackets', async () => {
+                setTemplate(`<foo [simpleInp]="'a'"></foo>`);
+                await setProps({ simpleInp: 'b' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  simpleInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'a',
+                    firstChange: true,
+                  }),
+                });
               });
             });
           });
@@ -1424,6 +1502,20 @@ describe('StorybookWrapperComponent', () => {
               expect(outSpy2).toBeCalledWith(eventData);
               expect(ngOnChangesSpy).toBeCalledTimes(0);
             });
+
+            // describe('manual binding', () => {
+            //   it('with brackets', async () => {
+            //     setTemplate(`<foo (simpleInp)="'a'"></foo>`);
+            //     const outSpy = createOutputPropSpy();
+            //     await setProps({ simpleOut: outSpy });
+            //     expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+            //     const eventData = { a: 'b' };
+            //     emitOutput('simpleOut', eventData);
+            //     expect(outSpy).toBeCalledTimes(1);
+            //     expect(outSpy).toBeCalledWith(eventData);
+            //     expect(ngOnChangesSpy).toBeCalledTimes(0);
+            //   });
+            // });
           });
 
           describe('not in inital props', () => {
@@ -1639,7 +1731,6 @@ describe('StorybookWrapperComponent', () => {
               expect(outSpy2).toBeCalledTimes(1);
               expect(outSpy2).toBeCalledWith(eventData);
               expect(ngOnChangesSpy).toBeCalledTimes(0);
-
             });
           });
         });
@@ -1663,63 +1754,107 @@ describe('StorybookWrapperComponent', () => {
             expect(ngOnChangesOrder).toBeLessThan(ngOnInitOrder);
           });
         });
+
+        describe('bindings', () => {
+          it('should know bound non-bracket inputs and outputs', async () => {
+            setTemplate(`<foo simpleInp="{{simpleInp}}" (simpleOut)="simpleOut"></foo>`);
+            await setProps({ simpleInp: 'a', simpleOut: () => {} });
+            const inst = getPropsDirectiveInstance(getWrapperElement().querySelector('foo')!);
+            expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
+            expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
+            expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
+          });
+
+          it('should know bound bracket inputs and outputs', async () => {
+            setTemplate(`<foo [simpleInp]="simpleInp" (simpleOut)="simpleOut"></foo>`);
+            await setProps({ simpleInp: 'a', simpleOut: () => {} });
+            const inst = getPropsDirectiveInstance(getWrapperElement().querySelector('foo')!);
+            expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
+            expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
+            expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
+          });
+        });
       });
 
-      // describe('component initially not rendered in template', () => {
-      //   beforeEach(() => {
-      //     data.storyFnAngular.template = `<ng-container *ngIf="isVisible"><foo></foo></ng-container>`;
-      //   });
-
-      //   describe('with input prop', () => {
-      //     describe('in initial props', () => {
-      //       it('should render', async () => {
-      //         await setProps({ simpleInp: 'a' });
-      //         expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
-      //         await setProps({ simpleInp: 'a', isVisible: true });
-      //         // await setProps({ simpleInp: 'a', isVisible: true });
-      //         expect(getWrapperElement().innerHTML).toBe(
-      //           dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
-      //             "ng-reflect-ng-if": "true"
-      //           }-->`
-      //         );
-      //       });
-      //     });
-
-      //     describe('not in initial props', () => {
-      //       it('should render', async () => {
-      //         await setProps({});
-      //         expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
-      //         await setProps({ isVisible: true, simpleInp: 'a' });
-      //         expect(getWrapperElement().innerHTML).toBe(
-      //           dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
-      //             "ng-reflect-ng-if": "true"
-      //           }-->`
-      //         );
+      // describe('manual binding in template', () => {
+      //   describe('input', () => {
+      //     it('with brackets', async () => {
+      //       setTemplate(`<foo [simpleInp]="'a'"></foo>`);
+      //       await setProps({ simpleInp: 'a' });
+      //       expect(getWrapperElement().innerHTML).toBe(
+      //         '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+      //       );
+      //       expect(ngOnChangesSpy).toBeCalledTimes(1);
+      //       expect(ngOnChangesSpy).toHaveBeenCalledWith({
+      //         simpleInp: expect.objectContaining({
+      //           previousValue: undefined,
+      //           currentValue: 'a',
+      //           firstChange: true,
+      //         }),
       //       });
       //     });
       //   });
-      // });
 
-      // describe('multiple instances of component', () => {
-      //   beforeEach(() => {
-      //     data.storyFnAngular.template = `<foo></foo><foo></foo>`;
-      //   });
+      //   describe('output', () => {
 
-      //   it('should set props on all instances', async () => {
-      //     await setProps({ simpleInp: 'a' });
-      //     expect(getWrapperElement().innerHTML).toBe(
-      //       '<foo>[a][][][]</foo><!--container--><foo>[a][][][]</foo><!--container-->'
-      //     );
-      //   });
-
-      //   it('should set props on first instance', async () => {
-      //     data.parameters.setPropsOnAllComponentInstances = false;
-      //     await setProps({ simpleInp: 'a' });
-      //     expect(getWrapperElement().innerHTML).toBe(
-      //       '<foo>[a][][][]</foo><!--container--><foo>[][][][]</foo><!--container-->'
-      //     );
       //   });
       // });
+
+      describe('component initially not rendered in template', () => {
+        beforeEach(() => {
+          setTemplate(`<ng-container *ngIf="isVisible"><foo></foo></ng-container>`);
+        });
+
+        describe('with input prop', () => {
+          describe('in initial props', () => {
+            it('should render', async () => {
+              await setProps({ simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
+              await setProps({ simpleInp: 'a', isVisible: true });
+              // await setProps({ simpleInp: 'a', isVisible: true });
+              expect(getWrapperElement().innerHTML).toBe(
+                dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
+                  "ng-reflect-ng-if": "true"
+                }-->`
+              );
+            });
+          });
+
+          describe('not in initial props', () => {
+            it('should render', async () => {
+              await setProps({});
+              expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
+              await setProps({ isVisible: true, simpleInp: 'a' });
+              expect(getWrapperElement().innerHTML).toBe(
+                dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
+                  "ng-reflect-ng-if": "true"
+                }-->`
+              );
+            });
+          });
+        });
+      });
+
+      describe('multiple instances of component', () => {
+        beforeEach(() => {
+          data.storyFnAngular.template = `<foo></foo><foo></foo>`;
+        });
+
+        it('should set props on all instances', async () => {
+          await setProps({ simpleInp: 'a' });
+          expect(getWrapperElement().innerHTML).toBe(
+            '<foo>[a][][][]</foo><!--container--><foo>[a][][][]</foo><!--container-->'
+          );
+        });
+
+        // it('should set props on first instance', async () => {
+        //   data.parameters.setPropsOnAllComponentInstances = false;
+        //   await setProps({ simpleInp: 'a' });
+        //   expect(getWrapperElement().innerHTML).toBe(
+        //     '<foo>[a][][][]</foo><!--container--><foo>[][][][]</foo><!--container-->'
+        //   );
+        // });
+      });
     });
   });
 });

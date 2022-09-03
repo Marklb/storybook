@@ -7,9 +7,11 @@ import {
   Directive,
   ElementRef,
   EventEmitter,
+  forwardRef,
   Host,
   Inject,
   InjectFlags,
+  InjectionToken,
   Injector,
   OnDestroy,
   OnInit,
@@ -21,12 +23,14 @@ import {
   Type,
   ViewChild,
   ViewContainerRef,
+  ViewRef,
   ɵɵNgOnChangesFeature,
 } from '@angular/core';
 import { isObservable, Observable, Subject, Subscription } from 'rxjs';
 import { NgComponentOutlet } from '@angular/common';
 import { take, tap } from 'rxjs/operators';
 
+import { getBoundInputOutputNames } from './utils/TNodeAttrParser';
 import {
   ComponentInputsOutputs,
   ComponentIORecord,
@@ -132,6 +136,8 @@ function simpleChangesPrevious(instance: any, propName: string) {
   return undefined;
 }
 
+export const STORY_PROPS_DIRECTIVE = new InjectionToken<StoryWrapper>('STORY_WRAPPER');
+
 export const createStorybookWrapperDirective = (
   storyComponent: Type<unknown> | undefined,
   hasTemplate: boolean
@@ -178,10 +184,21 @@ export const createStorybookWrapperDirective = (
     selector = '[ngComponentOutlet]';
   }
 
+  // hookChanges(storyComponent);
+
   const preLog = ['%c[StorybookPropsDirective]', 'color:violet'];
 
   // @LifeCycleHooksLog('color:violet')
-  @Directive({ selector })
+  @Directive({
+    selector,
+    providers: [
+      {
+        provide: STORY_PROPS_DIRECTIVE,
+        // tslint:disable-next-line: no-use-before-declare
+        useExisting: forwardRef(() => StorybookPropsDirective),
+      },
+    ],
+  })
   class StorybookPropsDirective implements OnInit, AfterViewInit, OnDestroy {
     private subscription: Subscription | undefined;
 
@@ -197,6 +214,10 @@ export const createStorybookWrapperDirective = (
 
     private updatedProp = false;
 
+    private boundProps: string[] = [];
+
+    private boundInputOutputNames: string[] = [];
+
     constructor(
       @Inject(STORY_PROPS) private readonly storyProps$: Observable<ICollection | undefined>,
       // @Inject(STORY) private story$: Observable<StoryFnAngularReturnType>,
@@ -207,11 +228,33 @@ export const createStorybookWrapperDirective = (
       private readonly vcr: ViewContainerRef,
       // private readonly compRef: ComponentRef<any>,
       private readonly injector: Injector,
+      // private readonly compRef: ComponentRef,
+      // private readonly viewRef: ViewRef,
+      private readonly elementRef: ElementRef,
       @Optional() private readonly outlet: NgComponentOutlet,
       @Optional() @SkipSelf() private readonly sbPropsDir?: StorybookPropsDirective,
       @Optional() @Self() @Inject(storyComponent) readonly componentInstance?: any
     ) {
       console.log(...preLog, 'constructor', document.querySelector('foo')?.innerHTML);
+
+      // console.log('this.getInstance()', this.getInstance());
+      // console.log(this.getInstance().constructor.prototype.ɵcmp);
+
+      const boundProps = getSimpleChangesStore(this);
+      console.log('boundProps', boundProps);
+
+      const boundProps2 = Object.keys(this.componentInstance?.__ngSimpleChanges__?.current || {});
+      console.log('boundProps2', boundProps2);
+      this.boundProps = boundProps2;
+
+      const boundProps3 = (this.elementRef.nativeElement as HTMLElement).attributes;
+      console.log('boundProps3', boundProps3);
+
+      // eslint-disable-next-line no-underscore-dangle
+      console.log('~~', (this.injector as any)._tNode.attrs);
+
+      this.boundInputOutputNames = getBoundInputOutputNames(this.injector);
+      console.log('boundInputOutputNames', this.boundInputOutputNames);
 
       this.startPropsUpdating();
 
@@ -333,6 +376,25 @@ export const createStorybookWrapperDirective = (
       }
     }
 
+    // private setPropsOnInstance(): boolean {
+    //   if (!this.setPropsEnabled) {
+    //     return false;
+    //   }
+
+    //   const setPropsOnAllComponentInstances =
+    //     this.storyParameters.setPropsOnAllComponentInstances ?? true;
+    //   if (setPropsOnAllComponentInstances) {
+    //     return true;
+    //   }
+
+    //   // TODO: Consider removing, if a fixed identifier can't be linked to the
+    //   // first instance for identifying rendered and unrendered. It would not
+    //   // make sense to jump prop setting to the next component, because an ngIf
+    //   // hid the first. Maybe an attribute could be used. For loops and
+    //   // dynamically created components could be impossible to reidentify.
+    //   return this.storyWrapper.getPropsDirectiveIndex(this) === 0;
+    // }
+
     /**
      * Set inputs and outputs
      */
@@ -346,6 +408,10 @@ export const createStorybookWrapperDirective = (
       const hasNgOnChangesHook = !!instance.ngOnChanges;
 
       Object.keys(props).forEach((key: string) => {
+        if (this.boundProps.indexOf(key) !== -1) {
+          return;
+        }
+
         const info = getIOInfo(key);
         const value = props[key];
         const previousValue = this.previousValues[key];
