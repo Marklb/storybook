@@ -289,14 +289,6 @@ export const createStorybookWrapperDirective = (
     ngOnInit(): void {
       // console.log('[StorybookPropsDirective] ngOnInit');
       console.log(...preLog, 'ngOnInit', document.querySelector('foo')?.innerHTML);
-
-      const directives = this.injector.get(
-        Directive,
-        false,
-        // eslint-disable-next-line no-bitwise
-        InjectFlags.Self | InjectFlags.Optional
-      );
-      console.log('directives', directives);
     }
 
     ngOnChanges(changes: SimpleChanges) {
@@ -395,6 +387,15 @@ export const createStorybookWrapperDirective = (
     //   return this.storyWrapper.getPropsDirectiveIndex(this) === 0;
     // }
 
+    public propNameToInstancePropertyName(name: string): string {
+      const info = getIOInfo(name);
+      return info !== undefined ? info.record.propName : name;
+    }
+
+    public isBoundProperty(name: string): boolean {
+      return this.boundInputOutputNames.indexOf(name) !== -1;
+    }
+
     /**
      * Set inputs and outputs
      */
@@ -419,6 +420,10 @@ export const createStorybookWrapperDirective = (
 
         if (previousValue !== value) {
           if (info !== undefined) {
+            if (this.isBoundProperty(key)) {
+              return;
+            }
+
             if (this.emulateTemplateBinding(key)) {
               if (info.ioType === 'input') {
                 ngOnChangesSetInput(this.getInstance(), value, key, instancePropName);

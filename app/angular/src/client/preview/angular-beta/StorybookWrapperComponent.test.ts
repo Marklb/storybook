@@ -15,6 +15,7 @@ import {
   Output,
   SimpleChanges,
   TemplateRef,
+  Type,
   ɵresetJitOptions,
 } from '@angular/core';
 import { platformBrowserDynamicTesting } from '@angular/platform-browser-dynamic/testing';
@@ -78,6 +79,17 @@ function getPropsDirectiveInstance(nativeElement: any) {
   }
   const instance = ref.injector.get(STORY_PROPS_DIRECTIVE);
   return instance;
+}
+
+function createGetComponentInstanceFn(component: any) {
+  return (nativeElement: any) => {
+    const ref: any = nativeElement[TEST_INSTANCE_REF];
+    if (!ref) {
+      return null;
+    }
+    const instance = ref.injector.get(component);
+    return instance;
+  };
 }
 
 @Directive()
@@ -167,15 +179,16 @@ class SimpleInpDirective implements OnChanges {
   ngOnChanges(changes: SimpleChanges) {}
 }
 
-const commonComponents = [
-  [FooComponent],
-  [FooOnPushComponent],
-  [FooDirective],
-  // [NoSelectorComponent],
+type ComponentTypes = typeof FooComponent | typeof FooOnPushComponent | typeof FooDirective;
+const commonComponents: [ComponentTypes, string][] = [
+  [FooComponent, 'foo'],
+  [FooOnPushComponent, 'foo'],
+  [FooDirective, 'foo'],
+  // [NoSelectorComponent, 'ng-component'],
 ];
 
 describe('StorybookWrapperComponent', () => {
-  describe.each(commonComponents)('Base', (component) => {
+  describe.each(commonComponents)('Base', (component, componentSelector) => {
     describe(`Type ${component.name}`, () => {
       let rendererService: AbstractRenderer;
       let root: HTMLElement;
@@ -186,6 +199,24 @@ describe('StorybookWrapperComponent', () => {
       let data: Parameters<AbstractRenderer['render']>[0];
 
       let ngOnChangesDirSpy: jest.SpyInstance<void, [SimpleChanges]>;
+
+      function getComponentNativeElement(selector: string = componentSelector): HTMLElement {
+        const element: HTMLElement | null = getWrapperElement().querySelector(selector);
+        if (!element) {
+          throw Error(`component nativeElement not found, with selector '${selector}'.`);
+        }
+        return element;
+      }
+
+      const getComponentInstance = createGetComponentInstanceFn(component);
+
+      const getOutputSubscribersCount = (outputName: string) => {
+        const nativeElement = getComponentNativeElement();
+        const directiveInstance = getPropsDirectiveInstance(nativeElement);
+        const propertyName = directiveInstance.propNameToInstancePropertyName(outputName);
+        const componentInstance = getComponentInstance(nativeElement);
+        return componentInstance[propertyName].observers.length;
+      };
 
       const setProps = async (props: typeof data['storyFnAngular']['props']): Promise<void> => {
         data.storyFnAngular.props = props;
@@ -707,6 +738,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -719,6 +751,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -732,6 +765,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -750,6 +784,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -762,6 +797,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -775,6 +811,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -793,6 +830,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -805,6 +843,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -818,6 +857,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -836,6 +876,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -848,6 +889,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -861,6 +903,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -879,6 +922,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -891,6 +935,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -904,6 +949,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -922,6 +968,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -934,6 +981,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -947,6 +995,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -1470,6 +1519,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1482,6 +1532,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1495,6 +1546,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -1527,6 +1579,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1539,6 +1592,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1552,6 +1606,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -1570,6 +1625,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1582,6 +1638,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1595,6 +1652,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -1613,6 +1671,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1625,6 +1684,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1638,6 +1698,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -1656,6 +1717,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1668,6 +1730,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1681,6 +1744,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -1699,6 +1763,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1711,6 +1776,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(1);
@@ -1724,6 +1790,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
               expect(outSpy).toBeCalledTimes(0);
@@ -1772,6 +1839,53 @@ describe('StorybookWrapperComponent', () => {
             expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
             expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
             expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
+          });
+
+          it('should not set bound input from props', async () => {
+            setTemplate(`<foo simpleInp="a"></foo>`);
+            await setProps({ simpleInp: 'b' });
+            expect(getWrapperElement().innerHTML).toBe(
+              '<foo simpleinp="a" ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+            );
+            expect(ngOnChangesSpy).toBeCalledTimes(1);
+            expect(ngOnChangesSpy).toHaveBeenCalledWith({
+              simpleInp: expect.objectContaining({
+                previousValue: undefined,
+                currentValue: 'a',
+                firstChange: true,
+              }),
+            });
+          });
+
+          it('should not set bound bracket input from props', async () => {
+            setTemplate(`<foo [simpleInp]="'a'"></foo>`);
+            await setProps({ simpleInp: 'b' });
+            expect(getWrapperElement().innerHTML).toBe(
+              '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+            );
+            expect(ngOnChangesSpy).toBeCalledTimes(1);
+            expect(ngOnChangesSpy).toHaveBeenCalledWith({
+              simpleInp: expect.objectContaining({
+                previousValue: undefined,
+                currentValue: 'a',
+                firstChange: true,
+              }),
+            });
+          });
+
+          it('should not set bound output from props', async () => {
+            setTemplate(`<foo (simpleOut)="out($event)"></foo>`);
+            const outSpy1 = createOutputPropSpy();
+            const outSpy2 = createOutputPropSpy();
+            await setProps({ simpleOut: outSpy1, out: outSpy2 });
+            expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+            expect(getOutputSubscribersCount('simpleOut')).toBe(1);
+            const eventData = { a: 'b' };
+            emitOutput('simpleOut', eventData);
+            expect(outSpy1).toBeCalledTimes(0);
+            expect(outSpy2).toBeCalledTimes(1);
+            expect(outSpy2).toBeCalledWith(eventData);
+            expect(ngOnChangesSpy).toBeCalledTimes(0);
           });
         });
       });
