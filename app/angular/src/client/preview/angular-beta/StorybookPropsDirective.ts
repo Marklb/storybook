@@ -357,7 +357,8 @@ export const createStorybookWrapperDirective = (
           this.propsToSet = storyProps;
           // this.changeDetectorRef.detectChanges();
           // this.changeDetectorRef.markForCheck();
-          if (isUsingOnPush && this.propsToSet) {
+          // if (isUsingOnPush && this.propsToSet) {
+          if (this.propsToSet) {
             this.setProps(this.getInstance(), this.propsToSet, null);
             this.propsToSet = null;
           }
