@@ -10,8 +10,8 @@ export function getBoundInputOutputNames(injector: Injector): string[] {
     return [];
   }
 
-  const inputs = Object.keys(tNode.inputs);
-  const outputs = Object.keys(tNode.outputs);
+  const inputs = Object.keys(tNode?.inputs ?? []);
+  const outputs = Object.keys(tNode?.outputs ?? []);
   const ioNames = [...inputs, ...outputs];
   const attrIONames = getInputOutputNamesFromTNodeAttrs(tNode.attrs);
   return attrIONames.filter((x) => ioNames.indexOf(x) !== -1);

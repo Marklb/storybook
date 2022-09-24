@@ -34,6 +34,7 @@ export type StoryWrapper = {
     fn: (props: ICollection | undefined) => void
   ): boolean;
   unregisterPropsDirectiveInstance(instance: any): void;
+  // getPropsDirectiveIndex(instance: any): number;
 };
 
 export const STORY_WRAPPER = new InjectionToken<StoryWrapper>('STORY_WRAPPER');
@@ -76,6 +77,8 @@ export const createStorybookWrapperComponent = (
   const preLog = [
     '%c[StorybookWrapperComponent]', 'color:orange'
   ]
+
+  console.log('template', template);
 
   @Component({
     selector,
@@ -288,6 +291,10 @@ export const createStorybookWrapperComponent = (
     public unregisterPropsDirectiveInstance(instance: any): void {
       this.componentInstances = this.componentInstances.filter((x) => x.instance !== instance);
     }
+
+    // public getPropsDirectiveIndex(instance: any): number {
+    //   return this.componentInstances.findIndex((x) => x.instance === instance);
+    // }
   }
   return StorybookWrapperComponent;
 };

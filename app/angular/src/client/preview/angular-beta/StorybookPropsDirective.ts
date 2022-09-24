@@ -178,10 +178,13 @@ export const createStorybookWrapperDirective = (
     return ngComponentInputsOutputs.outputs.find((x) => isRecord(x, name));
   };
 
+  const hasSelector = ngComponentMetadata.selector !== undefined;
+
   let { selector } = ngComponentMetadata;
   if (!selector) {
     // Allow to add renderer component when NgComponent selector is undefined
     selector = '[ngComponentOutlet]';
+    // selector = 'ng-component';
   }
 
   // hookChanges(storyComponent);
@@ -217,6 +220,16 @@ export const createStorybookWrapperDirective = (
     private boundProps: string[] = [];
 
     private boundInputOutputNames: string[] = [];
+
+    @ViewChild(storyComponent, { static: false })
+    set storyComponentRef(value: any) {
+      // eslint-disable-next-line no-underscore-dangle
+      this._storyComponentRef = value;
+    }
+
+    _storyComponentRef: any = null;
+
+    private hasCreated = false;
 
     constructor(
       @Inject(STORY_PROPS) private readonly storyProps$: Observable<ICollection | undefined>,
@@ -276,7 +289,8 @@ export const createStorybookWrapperDirective = (
 
       this.storyWrapper.ngOnContentCheckedSubject.subscribe(() => {
         console.log('ngOnContentCheckedSubject', document.querySelector('foo')?.innerHTML);
-        if (!isUsingOnPush && this.propsToSet) {
+        // if (!isUsingOnPush && this.propsToSet) {
+        if (!isUsingOnPush && this.propsUpdatePending()) {
           this.setProps(this.getInstance(), this.propsToSet, null);
           this.propsToSet = null;
           // this.changeDetectorRef.markForCheck();
@@ -297,6 +311,16 @@ export const createStorybookWrapperDirective = (
 
     ngDoCheck() {
       console.log(...preLog, 'ngDoCheck', document.querySelector('foo')?.innerHTML);
+      if (!hasSelector && !this.hasCreated && this.getInstance() !== null) {
+        this.hasCreated = true;
+        if (this.propsUpdatePending()) {
+          this.setProps(this.getInstance(), this.propsToSet, null);
+          this.propsToSet = null;
+        }
+      }
+
+
+
       if (this.updatedProp) {
         // this.outlet.ngComponentOutletInjector.get(ChangeDetectorRef).markForCheck();
         // this.changeDetectorRef.detectChanges();
@@ -358,7 +382,8 @@ export const createStorybookWrapperDirective = (
           // this.changeDetectorRef.detectChanges();
           // this.changeDetectorRef.markForCheck();
           // if (isUsingOnPush && this.propsToSet) {
-          if (this.propsToSet) {
+          // if (this.propsToSet) {
+          if (this.propsUpdatePending()) {
             this.setProps(this.getInstance(), this.propsToSet, null);
             this.propsToSet = null;
           }
@@ -367,6 +392,18 @@ export const createStorybookWrapperDirective = (
           // }
         });
       }
+    }
+
+    public propsUpdatePending(): boolean {
+      if (this.propsToSet === undefined || this.propsToSet === null) {
+        return false;
+      }
+
+      if (hasSelector) {
+        return true;
+      }
+
+      return this.hasCreated;
     }
 
     // private setPropsOnInstance(): boolean {
@@ -464,7 +501,7 @@ export const createStorybookWrapperDirective = (
     private emulateTemplateBinding(propName: string): boolean {
       return (
         (this.storyParameters.emulatePropBindingIfNotInInitialProps ?? true) &&
-        (hasTemplate || (!hasTemplate && !this.isTemplateBoundProp(propName)))
+        (!hasSelector || hasTemplate || (!hasTemplate && !this.isTemplateBoundProp(propName)))
       );
     }
 

@@ -7,6 +7,7 @@ import {
   EventEmitter,
   forwardRef,
   getPlatform,
+  Inject,
   Injector,
   Input,
   NgZone,
@@ -25,6 +26,8 @@ import dedent from 'ts-dedent';
 import { CanvasRenderer } from './CanvasRenderer';
 import { AbstractRenderer } from './AbstractRenderer';
 import { STORY_PROPS_DIRECTIVE } from './StorybookPropsDirective';
+import { getComponentInputsOutputs } from './utils/NgComponentAnalyzer';
+import { NgComponentOutlet } from '@angular/common';
 
 jest.mock('@angular/platform-browser-dynamic');
 
@@ -71,9 +74,10 @@ declare const document: Document;
 // }
 
 const TEST_INSTANCE_REF: unique symbol = Symbol('__test_instance_ref__');
+const TEST_INSTANCE_REF2: unique symbol = Symbol('__test_instance_ref2__');
 
 function getPropsDirectiveInstance(nativeElement: any) {
-  const ref: any = nativeElement[TEST_INSTANCE_REF];
+  const ref: any = nativeElement[TEST_INSTANCE_REF2] || nativeElement[TEST_INSTANCE_REF];
   if (!ref) {
     return null;
   }
@@ -90,6 +94,28 @@ function createGetComponentInstanceFn(component: any) {
     const instance = ref.injector.get(component);
     return instance;
   };
+}
+
+@Directive({
+  selector: '[ngComponentOutlet]',
+})
+class TestAccessorDirective {
+  constructor(
+    private readonly injector: Injector,
+    private readonly outlet: NgComponentOutlet,
+    @Inject(STORY_PROPS_DIRECTIVE) private readonly storyPropsDirective: any
+  ) {
+    console.log('here', storyPropsDirective !== null);
+  }
+
+  ngDoCheck() {
+    // const nativeElement = document.querySelector('ng-component');
+    const instance = (this.outlet as any)?._componentRef?.instance;
+    const nativeElement = instance?.injector.get(ElementRef)?.nativeElement;
+    if (nativeElement) {
+      nativeElement[TEST_INSTANCE_REF2] = this.storyPropsDirective;
+    }
+  }
 }
 
 @Directive()
@@ -180,15 +206,17 @@ class SimpleInpDirective implements OnChanges {
 }
 
 type ComponentTypes = typeof FooComponent | typeof FooOnPushComponent | typeof FooDirective;
-const commonComponents: [ComponentTypes, string][] = [
-  [FooComponent, 'foo'],
-  [FooOnPushComponent, 'foo'],
-  [FooDirective, 'foo'],
-  // [NoSelectorComponent, 'ng-component'],
+const commonComponents: [ComponentTypes, string, boolean][] = [
+  [FooComponent, 'foo', false],
+  [FooOnPushComponent, 'foo', false],
+  [FooDirective, 'foo', false],
+  [NoSelectorComponent, 'ng-component', true],
 ];
 
+type ComponentExpectationProps = { [prop: string]: { value: any, binding: boolean } };
+
 describe('StorybookWrapperComponent', () => {
-  describe.each(commonComponents)('Base', (component, componentSelector) => {
+  describe.each(commonComponents)('Base', (component, componentSelector, noSelector) => {
     describe(`Type ${component.name}`, () => {
       let rendererService: AbstractRenderer;
       let root: HTMLElement;
@@ -227,8 +255,62 @@ describe('StorybookWrapperComponent', () => {
         data.storyFnAngular.template = template;
       };
 
+      const buildExpectationBindings = (props: ComponentExpectationProps) => {
+        if (noSelector) {
+          return '';
+        }
+
+        const ngComponentInputsOutputs = getComponentInputsOutputs(component);
+
+        const attrs = Object.keys(props)
+          .map((prop) => {
+            if (props[prop].binding) {
+              const propName = ngComponentInputsOutputs.inputs.find((x) => x.templateName === prop)
+                ?.propName;
+              if (propName) {
+                return buildNgReflectBindingStr(propName, props[prop].value);
+              }
+            }
+
+            return undefined;
+          })
+          .filter((x) => x !== undefined);
+        if (attrs.length === 0) {
+          return '';
+        }
+
+        return ` ${attrs.join(' ')}`;
+      };
+
+      const buildExpectationContent = (props: ComponentExpectationProps) => {
+        const simpleInp = Object.prototype.hasOwnProperty.call(props, 'simpleInp')
+          ? props.simpleInp.value
+          : '';
+        const toReNamedInp = Object.prototype.hasOwnProperty.call(props, 'reNamedInp')
+          ? props.reNamedInp.value
+          : '';
+        const fnInp = Object.prototype.hasOwnProperty.call(props, 'fnInp') ? props.fnInp.value : '';
+        const metaInput = Object.prototype.hasOwnProperty.call(props, 'metaInput')
+          ? props.metaInput.value
+          : '';
+        const misc = Object.prototype.hasOwnProperty.call(props, 'misc') ? props.misc.value : '';
+        return `[${simpleInp}][${toReNamedInp}][${fnInp}][${metaInput}]${misc}`;
+      };
+
+      const buildComponentExpectation = (props: ComponentExpectationProps) => {
+        const bindingsStr = buildExpectationBindings(props);
+        const outputPostfix = noSelector
+          ? `<!--bindings={\n  "ng-reflect-ng-component-outlet": "function ${component.name}()"\n}-->`
+          : `<!--container-->`;
+        // const outputPostfix = `<!---->`;
+        const content = buildExpectationContent(props);
+        return `<${componentSelector}${bindingsStr}>${content}</${componentSelector}>${outputPostfix}`;
+      };
+
       // const testComponent: BaseTestDirective = forwardRef(() => FooComponent) as any;
       // const testComponent = FooOnPushComponent;
+
+
 
       beforeEach(async () => {
         ngOnChangesSpy = jest.spyOn(component.prototype, 'ngOnChanges');
@@ -246,9 +328,12 @@ describe('StorybookWrapperComponent', () => {
         data = {
           storyFnAngular: {
             props: {},
-            // moduleMetadata: {
-            //   declarations: [FooDirDirective],
-            // },
+            moduleMetadata: {
+              declarations: [
+                // FooDirDirective
+                TestAccessorDirective,
+              ],
+            },
           },
           forced: true,
           parameters: {},
@@ -273,7 +358,7 @@ describe('StorybookWrapperComponent', () => {
             it('should set', async () => {
               await setProps({ simpleInp: 'a' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+                buildComponentExpectation({ simpleInp: { value: 'a', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -289,7 +374,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleInp: 'a' });
               await setProps({ simpleInp: 'a' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+                buildComponentExpectation({ simpleInp: { value: 'a', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -305,7 +390,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ simpleInp: 'a' });
               await setProps({ simpleInp: 'b' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-simple-inp="b">[b][][][]</foo><!--container-->'
+                buildComponentExpectation({ simpleInp: { value: 'b', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(2);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -325,7 +410,9 @@ describe('StorybookWrapperComponent', () => {
 
             it('should set', async () => {
               await setProps({ simpleInp: 'a' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ simpleInp: { value: 'a', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 simpleInp: expect.objectContaining({
@@ -339,7 +426,9 @@ describe('StorybookWrapperComponent', () => {
             it('should not set when prop does not change', async () => {
               await setProps({ simpleInp: 'a' });
               await setProps({ simpleInp: 'a' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ simpleInp: { value: 'a', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 simpleInp: expect.objectContaining({
@@ -353,7 +442,9 @@ describe('StorybookWrapperComponent', () => {
             it('should set when prop changes', async () => {
               await setProps({ simpleInp: 'a' });
               await setProps({ simpleInp: 'b' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[b][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ simpleInp: { value: 'b', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(2);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 simpleInp: expect.objectContaining({
@@ -373,7 +464,7 @@ describe('StorybookWrapperComponent', () => {
             it('should set', async () => {
               await setProps({ metaInput: 'm' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-meta-input="m">[][][][m]</foo><!--container-->'
+                buildComponentExpectation({ metaInput: { value: 'm', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -389,7 +480,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaInput: 'm' });
               await setProps({ metaInput: 'm' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-meta-input="m">[][][][m]</foo><!--container-->'
+                buildComponentExpectation({ metaInput: { value: 'm', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -405,7 +496,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ metaInput: 'm' });
               await setProps({ metaInput: 'n' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-meta-input="n">[][][][n]</foo><!--container-->'
+                buildComponentExpectation({ metaInput: { value: 'n', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(2);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -425,7 +516,9 @@ describe('StorybookWrapperComponent', () => {
 
             it('should set', async () => {
               await setProps({ metaInput: 'm' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ metaInput: { value: 'm', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 metaInput: expect.objectContaining({
@@ -439,7 +532,9 @@ describe('StorybookWrapperComponent', () => {
             it('should not set when prop does not change', async () => {
               await setProps({ metaInput: 'm' });
               await setProps({ metaInput: 'm' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ metaInput: { value: 'm', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 metaInput: expect.objectContaining({
@@ -453,7 +548,9 @@ describe('StorybookWrapperComponent', () => {
             it('should set when prop changes', async () => {
               await setProps({ metaInput: 'm' });
               await setProps({ metaInput: 'n' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][n]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ metaInput: { value: 'n', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(2);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 metaInput: expect.objectContaining({
@@ -473,7 +570,7 @@ describe('StorybookWrapperComponent', () => {
             it('should set', async () => {
               await setProps({ reNamedInp: 'r' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-to-re-named-inp="r">[][r][][]</foo><!--container-->'
+                buildComponentExpectation({ reNamedInp: { value: 'r', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -489,7 +586,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedInp: 'r' });
               await setProps({ reNamedInp: 'r' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-to-re-named-inp="r">[][r][][]</foo><!--container-->'
+                buildComponentExpectation({ reNamedInp: { value: 'r', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -505,7 +602,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ reNamedInp: 'r' });
               await setProps({ reNamedInp: 's' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-to-re-named-inp="s">[][s][][]</foo><!--container-->'
+                buildComponentExpectation({ reNamedInp: { value: 's', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(2);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -525,7 +622,9 @@ describe('StorybookWrapperComponent', () => {
 
             it('should set', async () => {
               await setProps({ reNamedInp: 'r' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ reNamedInp: { value: 'r', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 toReNamedInp: expect.objectContaining({
@@ -539,7 +638,9 @@ describe('StorybookWrapperComponent', () => {
             it('should not set when prop does not change', async () => {
               await setProps({ reNamedInp: 'r' });
               await setProps({ reNamedInp: 'r' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ reNamedInp: { value: 'r', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 toReNamedInp: expect.objectContaining({
@@ -553,7 +654,9 @@ describe('StorybookWrapperComponent', () => {
             it('should set when prop changes', async () => {
               await setProps({ reNamedInp: 'r' });
               await setProps({ reNamedInp: 's' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][s][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ reNamedInp: { value: 's', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(2);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 toReNamedInp: expect.objectContaining({
@@ -573,7 +676,7 @@ describe('StorybookWrapperComponent', () => {
             it('should set', async () => {
               await setProps({ fnInp: 'f' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-fn-inp="f">[][][f][]</foo><!--container-->'
+                buildComponentExpectation({ fnInp: { value: 'f', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -591,7 +694,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ fnInp: 'f' });
               await setProps({ fnInp: 'f' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-fn-inp="f">[][][f][]</foo><!--container-->'
+                buildComponentExpectation({ fnInp: { value: 'f', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -609,7 +712,7 @@ describe('StorybookWrapperComponent', () => {
               await setProps({ fnInp: 'f' });
               await setProps({ fnInp: 'g' });
               expect(getWrapperElement().innerHTML).toBe(
-                '<foo ng-reflect-fn-inp="g">[][][g][]</foo><!--container-->'
+                buildComponentExpectation({ fnInp: { value: 'g', binding: true } })
               );
               expect(ngOnChangesSpy).toBeCalledTimes(2);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -631,7 +734,9 @@ describe('StorybookWrapperComponent', () => {
 
             it('should set', async () => {
               await setProps({ fnInp: 'f' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ fnInp: { value: 'f', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 fnInp: expect.objectContaining({
@@ -647,7 +752,9 @@ describe('StorybookWrapperComponent', () => {
             it('should not set when prop does not change', async () => {
               await setProps({ fnInp: 'f' });
               await setProps({ fnInp: 'f' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ fnInp: { value: 'f', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 fnInp: expect.objectContaining({
@@ -663,7 +770,9 @@ describe('StorybookWrapperComponent', () => {
             it('should set when prop changes', async () => {
               await setProps({ fnInp: 'f' });
               await setProps({ fnInp: 'g' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][g][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ fnInp: { value: 'g', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(2);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 fnInp: expect.objectContaining({
@@ -684,21 +793,27 @@ describe('StorybookWrapperComponent', () => {
           describe('in inital props', () => {
             it('should set', async () => {
               await setProps({ misc: 'x' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ misc: { value: 'x', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(0);
             });
 
             it('should not set when prop does not change', async () => {
               await setProps({ misc: 'x' });
               await setProps({ misc: 'x' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ misc: { value: 'x', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(0);
             });
 
             it('should set when prop changes', async () => {
               await setProps({ misc: 'x' });
               await setProps({ misc: 'y' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ misc: { value: 'y', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(0);
             });
           });
@@ -710,21 +825,27 @@ describe('StorybookWrapperComponent', () => {
 
             it('should set', async () => {
               await setProps({ misc: 'x' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ misc: { value: 'x', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(0);
             });
 
             it('should not set when prop does not change', async () => {
               await setProps({ misc: 'x' });
               await setProps({ misc: 'x' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ misc: { value: 'x', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(0);
             });
 
             it('should set when prop changes', async () => {
               await setProps({ misc: 'x' });
               await setProps({ misc: 'y' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(
+                buildComponentExpectation({ misc: { value: 'y', binding: false } })
+              );
               expect(ngOnChangesSpy).toBeCalledTimes(0);
             });
           });
@@ -737,7 +858,7 @@ describe('StorybookWrapperComponent', () => {
             it('should emit', async () => {
               const outSpy = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
@@ -750,7 +871,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
@@ -764,7 +885,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy2 = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
@@ -783,7 +904,7 @@ describe('StorybookWrapperComponent', () => {
             it('should emit', async () => {
               const outSpy = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
@@ -796,7 +917,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
@@ -810,7 +931,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy2 = createOutputPropSpy();
               await setProps({ simpleOut: outSpy });
               await setProps({ simpleOut: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('simpleOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('simpleOut', eventData);
@@ -829,7 +950,7 @@ describe('StorybookWrapperComponent', () => {
             it('should emit', async () => {
               const outSpy = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
@@ -842,7 +963,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
@@ -856,7 +977,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy2 = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
@@ -875,7 +996,7 @@ describe('StorybookWrapperComponent', () => {
             it('should emit', async () => {
               const outSpy = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
@@ -888,7 +1009,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
@@ -902,7 +1023,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy2 = createOutputPropSpy();
               await setProps({ metaOutput: outSpy });
               await setProps({ metaOutput: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('metaOutput')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('metaOutput', eventData);
@@ -921,7 +1042,7 @@ describe('StorybookWrapperComponent', () => {
             it('should emit', async () => {
               const outSpy = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
@@ -934,7 +1055,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
@@ -948,7 +1069,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy2 = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
@@ -967,7 +1088,7 @@ describe('StorybookWrapperComponent', () => {
             it('should emit', async () => {
               const outSpy = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
@@ -980,7 +1101,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
@@ -994,7 +1115,7 @@ describe('StorybookWrapperComponent', () => {
               const outSpy2 = createOutputPropSpy();
               await setProps({ reNamedOut: outSpy });
               await setProps({ reNamedOut: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              expect(getWrapperElement().innerHTML).toBe(buildComponentExpectation({}));
               expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
               const eventData = { a: 'b' };
               emitOutput('toReNamedOut', eventData);
@@ -1024,71 +1145,35 @@ describe('StorybookWrapperComponent', () => {
           });
         });
 
-        describe('bindings', () => {
-          it('should know bound inputs and outputs', async () => {
-            await setProps({ simpleInp: 'a', simpleOut: () => {} });
-            const inst = getPropsDirectiveInstance(getWrapperElement().querySelector('foo')!);
-            expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
-            expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
-            expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
+        // Without a selector there isn't a tag to add bindings to.
+        if (!noSelector) {
+          describe('bindings', () => {
+            it('should know bound inputs and outputs', async () => {
+              await setProps({ simpleInp: 'a', simpleOut: () => {} });
+              const inst = getPropsDirectiveInstance(
+                getWrapperElement().querySelector(`${componentSelector}`)
+              );
+              expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
+              expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
+              expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
+            });
           });
-        });
+        }
       });
 
-      describe('template', () => {
-        beforeEach(() => {
-          setTemplate(`<foo></foo>`);
-        });
-
-        describe('simple input', () => {
-          describe('in inital props', () => {
-            it('should set', async () => {
-              await setProps({ simpleInp: 'a' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                simpleInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'a',
-                  firstChange: true,
-                }),
-              });
-            });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ simpleInp: 'a' });
-              await setProps({ simpleInp: 'a' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                simpleInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'a',
-                  firstChange: true,
-                }),
-              });
-            });
-
-            it('should set when prop changes', async () => {
-              await setProps({ simpleInp: 'a' });
-              await setProps({ simpleInp: 'b' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[b][][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(2);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                simpleInp: expect.objectContaining({
-                  previousValue: 'a',
-                  currentValue: 'b',
-                  firstChange: false,
-                }),
-              });
-            });
-
-            describe('manual binding', () => {
-              it('without brackets', async () => {
-                setTemplate(`<foo simpleInp="a"></foo>`);
-                await setProps({ simpleInp: 'b' });
+      // Without a selector there isn't a tag to use in a template.
+      if (!noSelector) {
+        describe('template', () => {
+          beforeEach(() => {
+            setTemplate(`<${componentSelector}></${componentSelector}>`);
+          });
+  
+          describe('simple input', () => {
+            describe('in inital props', () => {
+              it('should set', async () => {
+                await setProps({ simpleInp: 'a' });
                 expect(getWrapperElement().innerHTML).toBe(
-                  '<foo simpleinp="a" ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+                  `<${componentSelector}>[a][][][]</foo><!--container-->`
                 );
                 expect(ngOnChangesSpy).toBeCalledTimes(1);
                 expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -1099,12 +1184,12 @@ describe('StorybookWrapperComponent', () => {
                   }),
                 });
               });
-
-              it('with brackets', async () => {
-                setTemplate(`<foo [simpleInp]="'a'"></foo>`);
-                await setProps({ simpleInp: 'b' });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ simpleInp: 'a' });
+                await setProps({ simpleInp: 'a' });
                 expect(getWrapperElement().innerHTML).toBe(
-                  '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+                  `<${componentSelector}>[a][][][]</foo><!--container-->`
                 );
                 expect(ngOnChangesSpy).toBeCalledTimes(1);
                 expect(ngOnChangesSpy).toHaveBeenCalledWith({
@@ -1115,17 +1200,819 @@ describe('StorybookWrapperComponent', () => {
                   }),
                 });
               });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ simpleInp: 'a' });
+                await setProps({ simpleInp: 'b' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[b][][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(2);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  simpleInp: expect.objectContaining({
+                    previousValue: 'a',
+                    currentValue: 'b',
+                    firstChange: false,
+                  }),
+                });
+              });
+  
+              describe('manual binding', () => {
+                it('without brackets', async () => {
+                  setTemplate(`<${componentSelector} simpleInp="a"></${componentSelector}>`);
+                  await setProps({ simpleInp: 'b' });
+                  expect(getWrapperElement().innerHTML).toBe(
+                    `<${componentSelector} simpleinp="a" ng-reflect-simple-inp="a">[a][][][]</${componentSelector}><!--container-->`
+                  );
+                  expect(ngOnChangesSpy).toBeCalledTimes(1);
+                  expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                    simpleInp: expect.objectContaining({
+                      previousValue: undefined,
+                      currentValue: 'a',
+                      firstChange: true,
+                    }),
+                  });
+                });
+  
+                it('with brackets', async () => {
+                  setTemplate(`<${componentSelector} [simpleInp]="'a'"></${componentSelector}>`);
+                  await setProps({ simpleInp: 'b' });
+                  expect(getWrapperElement().innerHTML).toBe(
+                    `<${componentSelector} ng-reflect-simple-inp="a">[a][][][]</${componentSelector}><!--container-->`
+                  );
+                  expect(ngOnChangesSpy).toBeCalledTimes(1);
+                  expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                    simpleInp: expect.objectContaining({
+                      previousValue: undefined,
+                      currentValue: 'a',
+                      firstChange: true,
+                    }),
+                  });
+                });
+              });
+            });
+  
+            describe('not in inital props', () => {
+              beforeEach(async () => {
+                await setProps({});
+              });
+  
+              it('should set', async () => {
+                await setProps({ simpleInp: 'a' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[a][][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  simpleInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'a',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ simpleInp: 'a' });
+                await setProps({ simpleInp: 'a' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[a][][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  simpleInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'a',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ simpleInp: 'a' });
+                await setProps({ simpleInp: 'b' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[b][][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(2);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  simpleInp: expect.objectContaining({
+                    previousValue: 'a',
+                    currentValue: 'b',
+                    firstChange: false,
+                  }),
+                });
+              });
             });
           });
-
-          describe('not in inital props', () => {
-            beforeEach(async () => {
-              await setProps({});
+  
+          // //////////
+  
+          describe('metadata input', () => {
+            describe('in inital props', () => {
+              it('should set', async () => {
+                await setProps({ metaInput: 'm' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][m]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  metaInput: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'm',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ metaInput: 'm' });
+                await setProps({ metaInput: 'm' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][m]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  metaInput: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'm',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ metaInput: 'm' });
+                await setProps({ metaInput: 'n' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][n]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(2);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  metaInput: expect.objectContaining({
+                    previousValue: 'm',
+                    currentValue: 'n',
+                    firstChange: false,
+                  }),
+                });
+              });
             });
-
-            it('should set', async () => {
+  
+            describe('not in inital props', () => {
+              beforeEach(async () => {
+                await setProps({});
+              });
+  
+              it('should set', async () => {
+                await setProps({ metaInput: 'm' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][m]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  metaInput: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'm',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ metaInput: 'm' });
+                await setProps({ metaInput: 'm' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][m]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  metaInput: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'm',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ metaInput: 'm' });
+                await setProps({ metaInput: 'n' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][n]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(2);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  metaInput: expect.objectContaining({
+                    previousValue: 'm',
+                    currentValue: 'n',
+                    firstChange: false,
+                  }),
+                });
+              });
+            });
+          });
+  
+          // //////////
+  
+          describe('renamed input', () => {
+            describe('in inital props', () => {
+              it('should set', async () => {
+                await setProps({ reNamedInp: 'r' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][r][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  toReNamedInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'r',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ reNamedInp: 'r' });
+                await setProps({ reNamedInp: 'r' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][r][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  toReNamedInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'r',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ reNamedInp: 'r' });
+                await setProps({ reNamedInp: 's' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][s][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(2);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  toReNamedInp: expect.objectContaining({
+                    previousValue: 'r',
+                    currentValue: 's',
+                    firstChange: false,
+                  }),
+                });
+              });
+            });
+  
+            describe('not in inital props', () => {
+              beforeEach(async () => {
+                await setProps({});
+              });
+  
+              it('should set', async () => {
+                await setProps({ reNamedInp: 'r' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][r][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  toReNamedInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'r',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ reNamedInp: 'r' });
+                await setProps({ reNamedInp: 'r' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][r][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  toReNamedInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'r',
+                    firstChange: true,
+                  }),
+                });
+              });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ reNamedInp: 'r' });
+                await setProps({ reNamedInp: 's' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][s][][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(2);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  toReNamedInp: expect.objectContaining({
+                    previousValue: 'r',
+                    currentValue: 's',
+                    firstChange: false,
+                  }),
+                });
+              });
+            });
+          });
+  
+          // //////////
+  
+          describe('getter/setter input', () => {
+            describe('in inital props', () => {
+              it('should set', async () => {
+                await setProps({ fnInp: 'f' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][f][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  fnInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'f',
+                    firstChange: true,
+                  }),
+                });
+                expect(somethingSpy).toBeCalledTimes(1);
+                expect(somethingSpy).toBeCalledWith('f');
+              });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ fnInp: 'f' });
+                await setProps({ fnInp: 'f' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][f][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  fnInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'f',
+                    firstChange: true,
+                  }),
+                });
+                expect(somethingSpy).toBeCalledTimes(1);
+                expect(somethingSpy).toBeCalledWith('f');
+              });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ fnInp: 'f' });
+                await setProps({ fnInp: 'g' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][g][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(2);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  fnInp: expect.objectContaining({
+                    previousValue: 'f',
+                    currentValue: 'g',
+                    firstChange: false,
+                  }),
+                });
+                expect(somethingSpy).toBeCalledTimes(2);
+                expect(somethingSpy).toBeCalledWith('g');
+              });
+            });
+  
+            describe('not in inital props', () => {
+              beforeEach(async () => {
+                await setProps({});
+              });
+  
+              it('should set', async () => {
+                await setProps({ fnInp: 'f' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][f][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  fnInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'f',
+                    firstChange: true,
+                  }),
+                });
+                expect(somethingSpy).toBeCalledTimes(1);
+                expect(somethingSpy).toBeCalledWith('f');
+              });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ fnInp: 'f' });
+                await setProps({ fnInp: 'f' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][f][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(1);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  fnInp: expect.objectContaining({
+                    previousValue: undefined,
+                    currentValue: 'f',
+                    firstChange: true,
+                  }),
+                });
+                expect(somethingSpy).toBeCalledTimes(1);
+                expect(somethingSpy).toBeCalledWith('f');
+              });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ fnInp: 'f' });
+                await setProps({ fnInp: 'g' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][g][]</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(2);
+                expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                  fnInp: expect.objectContaining({
+                    previousValue: 'f',
+                    currentValue: 'g',
+                    firstChange: false,
+                  }),
+                });
+                expect(somethingSpy).toBeCalledTimes(2);
+                expect(somethingSpy).toBeCalledWith('g');
+              });
+            });
+          });
+  
+          // //////////
+  
+          describe('non-input props', () => {
+            describe('in inital props', () => {
+              it('should set', async () => {
+                await setProps({ misc: 'x' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]x</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ misc: 'x' });
+                await setProps({ misc: 'x' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]x</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ misc: 'x' });
+                await setProps({ misc: 'y' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]y</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+            });
+            describe('not in inital props', () => {
+              beforeEach(async () => {
+                await setProps({});
+              });
+  
+              it('should set', async () => {
+                await setProps({ misc: 'x' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]x</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should not set when prop does not change', async () => {
+                await setProps({ misc: 'x' });
+                await setProps({ misc: 'x' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]x</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should set when prop changes', async () => {
+                await setProps({ misc: 'x' });
+                await setProps({ misc: 'y' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]y</${componentSelector}><!--container-->`
+                );
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+            });
+          });
+  
+          // //////////
+  
+          describe('simple output', () => {
+            describe('in inital props', () => {
+              it('should emit', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ simpleOut: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+                );
+                expect(getOutputSubscribersCount('simpleOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('simpleOut', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should not subscribe again when prop does not change', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ simpleOut: outSpy });
+                await setProps({ simpleOut: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+                );
+                expect(getOutputSubscribersCount('simpleOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('simpleOut', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should unsubscribe previous when prop changes', async () => {
+                const outSpy = createOutputPropSpy();
+                const outSpy2 = createOutputPropSpy();
+                await setProps({ simpleOut: outSpy });
+                await setProps({ simpleOut: outSpy2 });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+                );
+                expect(getOutputSubscribersCount('simpleOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('simpleOut', eventData);
+                expect(outSpy).toBeCalledTimes(0);
+                expect(outSpy2).toBeCalledTimes(1);
+                expect(outSpy2).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              // describe('manual binding', () => {
+              //   it('with brackets', async () => {
+              //     setTemplate(`<foo (simpleInp)="'a'"></foo>`);
+              //     const outSpy = createOutputPropSpy();
+              //     await setProps({ simpleOut: outSpy });
+              //     expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
+              //     const eventData = { a: 'b' };
+              //     emitOutput('simpleOut', eventData);
+              //     expect(outSpy).toBeCalledTimes(1);
+              //     expect(outSpy).toBeCalledWith(eventData);
+              //     expect(ngOnChangesSpy).toBeCalledTimes(0);
+              //   });
+              // });
+            });
+  
+            describe('not in inital props', () => {
+              beforeEach(async () => {
+                await setProps({});
+              });
+  
+              it('should emit', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ simpleOut: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+                );
+                expect(getOutputSubscribersCount('simpleOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('simpleOut', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should not subscribe again when prop does not change', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ simpleOut: outSpy });
+                await setProps({ simpleOut: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+                );
+                expect(getOutputSubscribersCount('simpleOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('simpleOut', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should unsubscribe previous when prop changes', async () => {
+                const outSpy = createOutputPropSpy();
+                const outSpy2 = createOutputPropSpy();
+                await setProps({ simpleOut: outSpy });
+                await setProps({ simpleOut: outSpy2 });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+                );
+                expect(getOutputSubscribersCount('simpleOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('simpleOut', eventData);
+                expect(outSpy).toBeCalledTimes(0);
+                expect(outSpy2).toBeCalledTimes(1);
+                expect(outSpy2).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+            });
+          });
+  
+          // //////////
+  
+          describe('metadata output', () => {
+            describe('in inital props', () => {
+              it('should emit', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ metaOutput: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(`<${componentSelector}>[][][][]</${componentSelector}><!--container-->`);
+                expect(getOutputSubscribersCount('metaOutput')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('metaOutput', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should not subscribe again when prop does not change', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ metaOutput: outSpy });
+                await setProps({ metaOutput: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(`<${componentSelector}>[][][][]</${componentSelector}><!--container-->`);
+                expect(getOutputSubscribersCount('metaOutput')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('metaOutput', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should unsubscribe previous when prop changes', async () => {
+                const outSpy = createOutputPropSpy();
+                const outSpy2 = createOutputPropSpy();
+                await setProps({ metaOutput: outSpy });
+                await setProps({ metaOutput: outSpy2 });
+                expect(getWrapperElement().innerHTML).toBe(`<${componentSelector}>[][][][]</${componentSelector}><!--container-->`);
+                expect(getOutputSubscribersCount('metaOutput')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('metaOutput', eventData);
+                expect(outSpy).toBeCalledTimes(0);
+                expect(outSpy2).toBeCalledTimes(1);
+                expect(outSpy2).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+            });
+  
+            describe('not in inital props', () => {
+              beforeEach(async () => {
+                await setProps({});
+              });
+  
+              it('should emit', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ metaOutput: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+                );
+                expect(getOutputSubscribersCount('metaOutput')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('metaOutput', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should not subscribe again when prop does not change', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ metaOutput: outSpy });
+                await setProps({ metaOutput: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+                );
+                expect(getOutputSubscribersCount('metaOutput')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('metaOutput', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should unsubscribe previous when prop changes', async () => {
+                const outSpy = createOutputPropSpy();
+                const outSpy2 = createOutputPropSpy();
+                await setProps({ metaOutput: outSpy });
+                await setProps({ metaOutput: outSpy2 });
+                expect(getWrapperElement().innerHTML).toBe(
+                  `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+                );
+                expect(getOutputSubscribersCount('metaOutput')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('metaOutput', eventData);
+                expect(outSpy).toBeCalledTimes(0);
+                expect(outSpy2).toBeCalledTimes(1);
+                expect(outSpy2).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+            });
+          });
+  
+          // //////////
+  
+          describe('renamed output', () => {
+            describe('in inital props', () => {
+              it('should emit', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ reNamedOut: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(`<${componentSelector}>[][][][]</${componentSelector}><!--container-->`);
+                expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('toReNamedOut', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should not subscribe again when prop does not change', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ reNamedOut: outSpy });
+                await setProps({ reNamedOut: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(`<${componentSelector}>[][][][]</${componentSelector}><!--container-->`);
+                expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('toReNamedOut', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should unsubscribe previous when prop changes', async () => {
+                const outSpy = createOutputPropSpy();
+                const outSpy2 = createOutputPropSpy();
+                await setProps({ reNamedOut: outSpy });
+                await setProps({ reNamedOut: outSpy2 });
+                expect(getWrapperElement().innerHTML).toBe(`<${componentSelector}>[][][][]</${componentSelector}><!--container-->`);
+                expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('toReNamedOut', eventData);
+                expect(outSpy).toBeCalledTimes(0);
+                expect(outSpy2).toBeCalledTimes(1);
+                expect(outSpy2).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+            });
+  
+            describe('not in inital props', () => {
+              beforeEach(async () => {
+                await setProps({});
+              });
+  
+              it('should emit', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ reNamedOut: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(`<${componentSelector}>[][][][]</${componentSelector}><!--container-->`);
+                expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('toReNamedOut', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should not subscribe again when prop does not change', async () => {
+                const outSpy = createOutputPropSpy();
+                await setProps({ reNamedOut: outSpy });
+                await setProps({ reNamedOut: outSpy });
+                expect(getWrapperElement().innerHTML).toBe(`<${componentSelector}>[][][][]</${componentSelector}><!--container-->`);
+                expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('toReNamedOut', eventData);
+                expect(outSpy).toBeCalledTimes(1);
+                expect(outSpy).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+  
+              it('should unsubscribe previous when prop changes', async () => {
+                const outSpy = createOutputPropSpy();
+                const outSpy2 = createOutputPropSpy();
+                await setProps({ reNamedOut: outSpy });
+                await setProps({ reNamedOut: outSpy2 });
+                expect(getWrapperElement().innerHTML).toBe(`<${componentSelector}>[][][][]</${componentSelector}><!--container-->`);
+                expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
+                const eventData = { a: 'b' };
+                emitOutput('toReNamedOut', eventData);
+                expect(outSpy).toBeCalledTimes(0);
+  
+                expect(outSpy2).toBeCalledTimes(1);
+                expect(outSpy2).toBeCalledWith(eventData);
+                expect(ngOnChangesSpy).toBeCalledTimes(0);
+              });
+            });
+          });
+  
+          // //////////
+  
+          describe('ngOnChanges', () => {
+            it('should call before ngOnInit', async () => {
               await setProps({ simpleInp: 'a' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
               expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 simpleInp: expect.objectContaining({
@@ -1134,848 +2021,185 @@ describe('StorybookWrapperComponent', () => {
                   firstChange: true,
                 }),
               });
+              expect(ngOnInitSpy).toBeCalledTimes(1);
+              const ngOnChangesOrder = ngOnChangesSpy.mock.invocationCallOrder[0];
+              const ngOnInitOrder = ngOnInitSpy.mock.invocationCallOrder[0];
+              expect(ngOnChangesOrder).toBeLessThan(ngOnInitOrder);
             });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ simpleInp: 'a' });
-              await setProps({ simpleInp: 'a' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[a][][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                simpleInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'a',
-                  firstChange: true,
-                }),
-              });
+          });
+  
+          describe('bindings', () => {
+            it('should know bound non-bracket inputs and outputs', async () => {
+              setTemplate(
+                `<${componentSelector} simpleInp="{{simpleInp}}" (simpleOut)="simpleOut"></${componentSelector}>`
+              );
+              await setProps({ simpleInp: 'a', simpleOut: () => {} });
+              const inst = getPropsDirectiveInstance(
+                getWrapperElement().querySelector(`${componentSelector}`)
+              );
+              expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
+              expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
+              expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
             });
-
-            it('should set when prop changes', async () => {
-              await setProps({ simpleInp: 'a' });
+  
+            it('should know bound bracket inputs and outputs', async () => {
+              setTemplate(
+                `<${componentSelector} [simpleInp]="simpleInp" (simpleOut)="simpleOut"></${componentSelector}>`
+              );
+              await setProps({ simpleInp: 'a', simpleOut: () => {} });
+              const inst = getPropsDirectiveInstance(
+                getWrapperElement().querySelector(`${componentSelector}`)
+              );
+              expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
+              expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
+              expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
+            });
+  
+            it('should not set bound input from props', async () => {
+              setTemplate(`<${componentSelector} simpleInp="a"></${componentSelector}>`);
               await setProps({ simpleInp: 'b' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[b][][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(2);
+              expect(getWrapperElement().innerHTML).toBe(
+                `<${componentSelector} simpleinp="a" ng-reflect-simple-inp="a">[a][][][]</${componentSelector}><!--container-->`
+              );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
               expect(ngOnChangesSpy).toHaveBeenCalledWith({
                 simpleInp: expect.objectContaining({
-                  previousValue: 'a',
-                  currentValue: 'b',
-                  firstChange: false,
-                }),
-              });
-            });
-          });
-        });
-
-        // //////////
-
-        describe('metadata input', () => {
-          describe('in inital props', () => {
-            it('should set', async () => {
-              await setProps({ metaInput: 'm' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                metaInput: expect.objectContaining({
                   previousValue: undefined,
-                  currentValue: 'm',
+                  currentValue: 'a',
                   firstChange: true,
                 }),
               });
             });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ metaInput: 'm' });
-              await setProps({ metaInput: 'm' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                metaInput: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'm',
-                  firstChange: true,
-                }),
-              });
-            });
-
-            it('should set when prop changes', async () => {
-              await setProps({ metaInput: 'm' });
-              await setProps({ metaInput: 'n' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][n]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(2);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                metaInput: expect.objectContaining({
-                  previousValue: 'm',
-                  currentValue: 'n',
-                  firstChange: false,
-                }),
-              });
-            });
-          });
-
-          describe('not in inital props', () => {
-            beforeEach(async () => {
-              await setProps({});
-            });
-
-            it('should set', async () => {
-              await setProps({ metaInput: 'm' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                metaInput: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'm',
-                  firstChange: true,
-                }),
-              });
-            });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ metaInput: 'm' });
-              await setProps({ metaInput: 'm' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][m]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                metaInput: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'm',
-                  firstChange: true,
-                }),
-              });
-            });
-
-            it('should set when prop changes', async () => {
-              await setProps({ metaInput: 'm' });
-              await setProps({ metaInput: 'n' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][n]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(2);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                metaInput: expect.objectContaining({
-                  previousValue: 'm',
-                  currentValue: 'n',
-                  firstChange: false,
-                }),
-              });
-            });
-          });
-        });
-
-        // //////////
-
-        describe('renamed input', () => {
-          describe('in inital props', () => {
-            it('should set', async () => {
-              await setProps({ reNamedInp: 'r' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                toReNamedInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'r',
-                  firstChange: true,
-                }),
-              });
-            });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ reNamedInp: 'r' });
-              await setProps({ reNamedInp: 'r' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                toReNamedInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'r',
-                  firstChange: true,
-                }),
-              });
-            });
-
-            it('should set when prop changes', async () => {
-              await setProps({ reNamedInp: 'r' });
-              await setProps({ reNamedInp: 's' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][s][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(2);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                toReNamedInp: expect.objectContaining({
-                  previousValue: 'r',
-                  currentValue: 's',
-                  firstChange: false,
-                }),
-              });
-            });
-          });
-
-          describe('not in inital props', () => {
-            beforeEach(async () => {
-              await setProps({});
-            });
-
-            it('should set', async () => {
-              await setProps({ reNamedInp: 'r' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                toReNamedInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'r',
-                  firstChange: true,
-                }),
-              });
-            });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ reNamedInp: 'r' });
-              await setProps({ reNamedInp: 'r' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][r][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                toReNamedInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'r',
-                  firstChange: true,
-                }),
-              });
-            });
-
-            it('should set when prop changes', async () => {
-              await setProps({ reNamedInp: 'r' });
-              await setProps({ reNamedInp: 's' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][s][][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(2);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                toReNamedInp: expect.objectContaining({
-                  previousValue: 'r',
-                  currentValue: 's',
-                  firstChange: false,
-                }),
-              });
-            });
-          });
-        });
-
-        // //////////
-
-        describe('getter/setter input', () => {
-          describe('in inital props', () => {
-            it('should set', async () => {
-              await setProps({ fnInp: 'f' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                fnInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'f',
-                  firstChange: true,
-                }),
-              });
-              expect(somethingSpy).toBeCalledTimes(1);
-              expect(somethingSpy).toBeCalledWith('f');
-            });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ fnInp: 'f' });
-              await setProps({ fnInp: 'f' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                fnInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'f',
-                  firstChange: true,
-                }),
-              });
-              expect(somethingSpy).toBeCalledTimes(1);
-              expect(somethingSpy).toBeCalledWith('f');
-            });
-
-            it('should set when prop changes', async () => {
-              await setProps({ fnInp: 'f' });
-              await setProps({ fnInp: 'g' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][g][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(2);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                fnInp: expect.objectContaining({
-                  previousValue: 'f',
-                  currentValue: 'g',
-                  firstChange: false,
-                }),
-              });
-              expect(somethingSpy).toBeCalledTimes(2);
-              expect(somethingSpy).toBeCalledWith('g');
-            });
-          });
-
-          describe('not in inital props', () => {
-            beforeEach(async () => {
-              await setProps({});
-            });
-
-            it('should set', async () => {
-              await setProps({ fnInp: 'f' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                fnInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'f',
-                  firstChange: true,
-                }),
-              });
-              expect(somethingSpy).toBeCalledTimes(1);
-              expect(somethingSpy).toBeCalledWith('f');
-            });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ fnInp: 'f' });
-              await setProps({ fnInp: 'f' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][f][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(1);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                fnInp: expect.objectContaining({
-                  previousValue: undefined,
-                  currentValue: 'f',
-                  firstChange: true,
-                }),
-              });
-              expect(somethingSpy).toBeCalledTimes(1);
-              expect(somethingSpy).toBeCalledWith('f');
-            });
-
-            it('should set when prop changes', async () => {
-              await setProps({ fnInp: 'f' });
-              await setProps({ fnInp: 'g' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][g][]</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(2);
-              expect(ngOnChangesSpy).toHaveBeenCalledWith({
-                fnInp: expect.objectContaining({
-                  previousValue: 'f',
-                  currentValue: 'g',
-                  firstChange: false,
-                }),
-              });
-              expect(somethingSpy).toBeCalledTimes(2);
-              expect(somethingSpy).toBeCalledWith('g');
-            });
-          });
-        });
-
-        // //////////
-
-        describe('non-input props', () => {
-          describe('in inital props', () => {
-            it('should set', async () => {
-              await setProps({ misc: 'x' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ misc: 'x' });
-              await setProps({ misc: 'x' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should set when prop changes', async () => {
-              await setProps({ misc: 'x' });
-              await setProps({ misc: 'y' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-          });
-          describe('not in inital props', () => {
-            beforeEach(async () => {
-              await setProps({});
-            });
-
-            it('should set', async () => {
-              await setProps({ misc: 'x' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should not set when prop does not change', async () => {
-              await setProps({ misc: 'x' });
-              await setProps({ misc: 'x' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]x</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should set when prop changes', async () => {
-              await setProps({ misc: 'x' });
-              await setProps({ misc: 'y' });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]y</foo><!--container-->');
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-          });
-        });
-
-        // //////////
-
-        describe('simple output', () => {
-          describe('in inital props', () => {
-            it('should emit', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ simpleOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('simpleOut', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should not subscribe again when prop does not change', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ simpleOut: outSpy });
-              await setProps({ simpleOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('simpleOut', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should unsubscribe previous when prop changes', async () => {
-              const outSpy = createOutputPropSpy();
-              const outSpy2 = createOutputPropSpy();
-              await setProps({ simpleOut: outSpy });
-              await setProps({ simpleOut: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('simpleOut', eventData);
-              expect(outSpy).toBeCalledTimes(0);
-              expect(outSpy2).toBeCalledTimes(1);
-              expect(outSpy2).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            // describe('manual binding', () => {
-            //   it('with brackets', async () => {
-            //     setTemplate(`<foo (simpleInp)="'a'"></foo>`);
-            //     const outSpy = createOutputPropSpy();
-            //     await setProps({ simpleOut: outSpy });
-            //     expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-            //     const eventData = { a: 'b' };
-            //     emitOutput('simpleOut', eventData);
-            //     expect(outSpy).toBeCalledTimes(1);
-            //     expect(outSpy).toBeCalledWith(eventData);
-            //     expect(ngOnChangesSpy).toBeCalledTimes(0);
-            //   });
-            // });
-          });
-
-          describe('not in inital props', () => {
-            beforeEach(async () => {
-              await setProps({});
-            });
-
-            it('should emit', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ simpleOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('simpleOut', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should not subscribe again when prop does not change', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ simpleOut: outSpy });
-              await setProps({ simpleOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('simpleOut', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should unsubscribe previous when prop changes', async () => {
-              const outSpy = createOutputPropSpy();
-              const outSpy2 = createOutputPropSpy();
-              await setProps({ simpleOut: outSpy });
-              await setProps({ simpleOut: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('simpleOut', eventData);
-              expect(outSpy).toBeCalledTimes(0);
-              expect(outSpy2).toBeCalledTimes(1);
-              expect(outSpy2).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-          });
-        });
-
-        // //////////
-
-        describe('metadata output', () => {
-          describe('in inital props', () => {
-            it('should emit', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ metaOutput: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('metaOutput', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should not subscribe again when prop does not change', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ metaOutput: outSpy });
-              await setProps({ metaOutput: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('metaOutput', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should unsubscribe previous when prop changes', async () => {
-              const outSpy = createOutputPropSpy();
-              const outSpy2 = createOutputPropSpy();
-              await setProps({ metaOutput: outSpy });
-              await setProps({ metaOutput: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('metaOutput', eventData);
-              expect(outSpy).toBeCalledTimes(0);
-              expect(outSpy2).toBeCalledTimes(1);
-              expect(outSpy2).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-          });
-
-          describe('not in inital props', () => {
-            beforeEach(async () => {
-              await setProps({});
-            });
-
-            it('should emit', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ metaOutput: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('metaOutput', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should not subscribe again when prop does not change', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ metaOutput: outSpy });
-              await setProps({ metaOutput: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('metaOutput', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should unsubscribe previous when prop changes', async () => {
-              const outSpy = createOutputPropSpy();
-              const outSpy2 = createOutputPropSpy();
-              await setProps({ metaOutput: outSpy });
-              await setProps({ metaOutput: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('metaOutput')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('metaOutput', eventData);
-              expect(outSpy).toBeCalledTimes(0);
-              expect(outSpy2).toBeCalledTimes(1);
-              expect(outSpy2).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-          });
-        });
-
-        // //////////
-
-        describe('renamed output', () => {
-          describe('in inital props', () => {
-            it('should emit', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ reNamedOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('toReNamedOut', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should not subscribe again when prop does not change', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ reNamedOut: outSpy });
-              await setProps({ reNamedOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('toReNamedOut', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should unsubscribe previous when prop changes', async () => {
-              const outSpy = createOutputPropSpy();
-              const outSpy2 = createOutputPropSpy();
-              await setProps({ reNamedOut: outSpy });
-              await setProps({ reNamedOut: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('toReNamedOut', eventData);
-              expect(outSpy).toBeCalledTimes(0);
-              expect(outSpy2).toBeCalledTimes(1);
-              expect(outSpy2).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-          });
-
-          describe('not in inital props', () => {
-            beforeEach(async () => {
-              await setProps({});
-            });
-
-            it('should emit', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ reNamedOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('toReNamedOut', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should not subscribe again when prop does not change', async () => {
-              const outSpy = createOutputPropSpy();
-              await setProps({ reNamedOut: outSpy });
-              await setProps({ reNamedOut: outSpy });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('toReNamedOut', eventData);
-              expect(outSpy).toBeCalledTimes(1);
-              expect(outSpy).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-
-            it('should unsubscribe previous when prop changes', async () => {
-              const outSpy = createOutputPropSpy();
-              const outSpy2 = createOutputPropSpy();
-              await setProps({ reNamedOut: outSpy });
-              await setProps({ reNamedOut: outSpy2 });
-              expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-              expect(getOutputSubscribersCount('reNamedOut')).toBe(1);
-              const eventData = { a: 'b' };
-              emitOutput('toReNamedOut', eventData);
-              expect(outSpy).toBeCalledTimes(0);
-
-              expect(outSpy2).toBeCalledTimes(1);
-              expect(outSpy2).toBeCalledWith(eventData);
-              expect(ngOnChangesSpy).toBeCalledTimes(0);
-            });
-          });
-        });
-
-        // //////////
-
-        describe('ngOnChanges', () => {
-          it('should call before ngOnInit', async () => {
-            await setProps({ simpleInp: 'a' });
-            expect(ngOnChangesSpy).toBeCalledTimes(1);
-            expect(ngOnChangesSpy).toHaveBeenCalledWith({
-              simpleInp: expect.objectContaining({
-                previousValue: undefined,
-                currentValue: 'a',
-                firstChange: true,
-              }),
-            });
-            expect(ngOnInitSpy).toBeCalledTimes(1);
-            const ngOnChangesOrder = ngOnChangesSpy.mock.invocationCallOrder[0];
-            const ngOnInitOrder = ngOnInitSpy.mock.invocationCallOrder[0];
-            expect(ngOnChangesOrder).toBeLessThan(ngOnInitOrder);
-          });
-        });
-
-        describe('bindings', () => {
-          it('should know bound non-bracket inputs and outputs', async () => {
-            setTemplate(`<foo simpleInp="{{simpleInp}}" (simpleOut)="simpleOut"></foo>`);
-            await setProps({ simpleInp: 'a', simpleOut: () => {} });
-            const inst = getPropsDirectiveInstance(getWrapperElement().querySelector('foo')!);
-            expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
-            expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
-            expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
-          });
-
-          it('should know bound bracket inputs and outputs', async () => {
-            setTemplate(`<foo [simpleInp]="simpleInp" (simpleOut)="simpleOut"></foo>`);
-            await setProps({ simpleInp: 'a', simpleOut: () => {} });
-            const inst = getPropsDirectiveInstance(getWrapperElement().querySelector('foo')!);
-            expect(inst.boundInputOutputNames as string[]).toHaveLength(2);
-            expect(inst.boundInputOutputNames as string[]).toContain('simpleInp');
-            expect(inst.boundInputOutputNames as string[]).toContain('simpleOut');
-          });
-
-          it('should not set bound input from props', async () => {
-            setTemplate(`<foo simpleInp="a"></foo>`);
-            await setProps({ simpleInp: 'b' });
-            expect(getWrapperElement().innerHTML).toBe(
-              '<foo simpleinp="a" ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
-            );
-            expect(ngOnChangesSpy).toBeCalledTimes(1);
-            expect(ngOnChangesSpy).toHaveBeenCalledWith({
-              simpleInp: expect.objectContaining({
-                previousValue: undefined,
-                currentValue: 'a',
-                firstChange: true,
-              }),
-            });
-          });
-
-          it('should not set bound bracket input from props', async () => {
-            setTemplate(`<foo [simpleInp]="'a'"></foo>`);
-            await setProps({ simpleInp: 'b' });
-            expect(getWrapperElement().innerHTML).toBe(
-              '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
-            );
-            expect(ngOnChangesSpy).toBeCalledTimes(1);
-            expect(ngOnChangesSpy).toHaveBeenCalledWith({
-              simpleInp: expect.objectContaining({
-                previousValue: undefined,
-                currentValue: 'a',
-                firstChange: true,
-              }),
-            });
-          });
-
-          it('should not set bound output from props', async () => {
-            setTemplate(`<foo (simpleOut)="out($event)"></foo>`);
-            const outSpy1 = createOutputPropSpy();
-            const outSpy2 = createOutputPropSpy();
-            await setProps({ simpleOut: outSpy1, out: outSpy2 });
-            expect(getWrapperElement().innerHTML).toBe('<foo>[][][][]</foo><!--container-->');
-            expect(getOutputSubscribersCount('simpleOut')).toBe(1);
-            const eventData = { a: 'b' };
-            emitOutput('simpleOut', eventData);
-            expect(outSpy1).toBeCalledTimes(0);
-            expect(outSpy2).toBeCalledTimes(1);
-            expect(outSpy2).toBeCalledWith(eventData);
-            expect(ngOnChangesSpy).toBeCalledTimes(0);
-          });
-        });
-      });
-
-      // describe('manual binding in template', () => {
-      //   describe('input', () => {
-      //     it('with brackets', async () => {
-      //       setTemplate(`<foo [simpleInp]="'a'"></foo>`);
-      //       await setProps({ simpleInp: 'a' });
-      //       expect(getWrapperElement().innerHTML).toBe(
-      //         '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
-      //       );
-      //       expect(ngOnChangesSpy).toBeCalledTimes(1);
-      //       expect(ngOnChangesSpy).toHaveBeenCalledWith({
-      //         simpleInp: expect.objectContaining({
-      //           previousValue: undefined,
-      //           currentValue: 'a',
-      //           firstChange: true,
-      //         }),
-      //       });
-      //     });
-      //   });
-
-      //   describe('output', () => {
-
-      //   });
-      // });
-
-      describe('component initially not rendered in template', () => {
-        beforeEach(() => {
-          setTemplate(`<ng-container *ngIf="isVisible"><foo></foo></ng-container>`);
-        });
-
-        describe('with input prop', () => {
-          describe('in initial props', () => {
-            it('should render', async () => {
-              await setProps({ simpleInp: 'a' });
-              expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
-              await setProps({ simpleInp: 'a', isVisible: true });
-              // await setProps({ simpleInp: 'a', isVisible: true });
+  
+            it('should not set bound bracket input from props', async () => {
+              setTemplate(`<${componentSelector} [simpleInp]="'a'"></${componentSelector}>`);
+              await setProps({ simpleInp: 'b' });
               expect(getWrapperElement().innerHTML).toBe(
-                dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
-                  "ng-reflect-ng-if": "true"
-                }-->`
+                `<${componentSelector} ng-reflect-simple-inp="a">[a][][][]</${componentSelector}><!--container-->`
               );
+              expect(ngOnChangesSpy).toBeCalledTimes(1);
+              expect(ngOnChangesSpy).toHaveBeenCalledWith({
+                simpleInp: expect.objectContaining({
+                  previousValue: undefined,
+                  currentValue: 'a',
+                  firstChange: true,
+                }),
+              });
             });
-          });
-
-          describe('not in initial props', () => {
-            it('should render', async () => {
-              await setProps({});
-              expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
-              await setProps({ isVisible: true, simpleInp: 'a' });
+  
+            it('should not set bound output from props', async () => {
+              setTemplate(`<${componentSelector} (simpleOut)="out($event)"></${componentSelector}>`);
+              const outSpy1 = createOutputPropSpy();
+              const outSpy2 = createOutputPropSpy();
+              await setProps({ simpleOut: outSpy1, out: outSpy2 });
               expect(getWrapperElement().innerHTML).toBe(
-                dedent`<foo>[a][][][]</foo><!--container--><!--ng-container--><!--bindings={
-                  "ng-reflect-ng-if": "true"
-                }-->`
+                `<${componentSelector}>[][][][]</${componentSelector}><!--container-->`
               );
+              expect(getOutputSubscribersCount('simpleOut')).toBe(1);
+              const eventData = { a: 'b' };
+              emitOutput('simpleOut', eventData);
+              expect(outSpy1).toBeCalledTimes(0);
+              expect(outSpy2).toBeCalledTimes(1);
+              expect(outSpy2).toBeCalledWith(eventData);
+              expect(ngOnChangesSpy).toBeCalledTimes(0);
             });
           });
         });
-      });
+      
 
-      describe('multiple instances of component', () => {
-        beforeEach(() => {
-          data.storyFnAngular.template = `<foo></foo><foo></foo>`;
-        });
-
-        it('should set props on all instances', async () => {
-          await setProps({ simpleInp: 'a' });
-          expect(getWrapperElement().innerHTML).toBe(
-            '<foo>[a][][][]</foo><!--container--><foo>[a][][][]</foo><!--container-->'
-          );
-        });
-
-        // it('should set props on first instance', async () => {
-        //   data.parameters.setPropsOnAllComponentInstances = false;
-        //   await setProps({ simpleInp: 'a' });
-        //   expect(getWrapperElement().innerHTML).toBe(
-        //     '<foo>[a][][][]</foo><!--container--><foo>[][][][]</foo><!--container-->'
-        //   );
+        // describe('manual binding in template', () => {
+        //   describe('input', () => {
+        //     it('with brackets', async () => {
+        //       setTemplate(`<foo [simpleInp]="'a'"></foo>`);
+        //       await setProps({ simpleInp: 'a' });
+        //       expect(getWrapperElement().innerHTML).toBe(
+        //         '<foo ng-reflect-simple-inp="a">[a][][][]</foo><!--container-->'
+        //       );
+        //       expect(ngOnChangesSpy).toBeCalledTimes(1);
+        //       expect(ngOnChangesSpy).toHaveBeenCalledWith({
+        //         simpleInp: expect.objectContaining({
+        //           previousValue: undefined,
+        //           currentValue: 'a',
+        //           firstChange: true,
+        //         }),
+        //       });
+        //     });
+        //   });
+  
+        //   describe('output', () => {
+  
+        //   });
         // });
-      });
+  
+        describe('component initially not rendered in template', () => {
+          beforeEach(() => {
+            setTemplate(
+              `<ng-container *ngIf="isVisible"><${componentSelector}></${componentSelector}></ng-container>`
+            );
+          });
+  
+          describe('with input prop', () => {
+            describe('in initial props', () => {
+              it('should render', async () => {
+                await setProps({ simpleInp: 'a' });
+                expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
+                await setProps({ simpleInp: 'a', isVisible: true });
+                expect(getWrapperElement().innerHTML).toBe(
+                  dedent`<${componentSelector}>[a][][][]</${componentSelector}><!--container--><!--ng-container--><!--bindings={
+                    "ng-reflect-ng-if": "true"
+                  }-->`
+                );
+              });
+            });
+  
+            describe('not in initial props', () => {
+              it('should render', async () => {
+                await setProps({});
+                expect(getWrapperElement().innerHTML).toBe('<!--bindings={}-->');
+                await setProps({ isVisible: true, simpleInp: 'a' });
+                expect(getWrapperElement().innerHTML).toBe(
+                  dedent`<${componentSelector}>[a][][][]</${componentSelector}><!--container--><!--ng-container--><!--bindings={
+                    "ng-reflect-ng-if": "true"
+                  }-->`
+                );
+              });
+            });
+          });
+        });
+  
+        describe('multiple instances of component', () => {
+          beforeEach(() => {
+            data.storyFnAngular.template = `<${componentSelector}></${componentSelector}><${componentSelector}></${componentSelector}>`;
+          });
+  
+          it('should set props on all instances', async () => {
+            await setProps({ simpleInp: 'a' });
+            expect(getWrapperElement().innerHTML).toBe(
+              `<${componentSelector}>[a][][][]</${componentSelector}><!--container--><${componentSelector}>[a][][][]</${componentSelector}><!--container-->`
+            );
+          });
+  
+          // it('should set props on first instance', async () => {
+          //   data.parameters.setPropsOnAllComponentInstances = false;
+          //   await setProps({ simpleInp: 'a' });
+          //   expect(getWrapperElement().innerHTML).toBe(
+          //     `<${componentSelector}>[a][][][]</${componentSelector}><!--container--><${componentSelector}>[][][][]</${componentSelector}><!--container-->`
+          //   );
+          // });
+        });
+      }
     });
   });
 });
 
 function emitOutput(outputPropName: string, data: any): void {
+  const element1 = getWrapperElement().querySelector('foo') as any;
+  const element2 = getWrapperElement().querySelector('ng-component') as any;
   // eslint-disable-next-line no-underscore-dangle
-  (getWrapperElement().querySelector('foo') as any).__testTrigger(outputPropName, data);
+  (element1 || element2).__testTrigger(outputPropName, data);
+
+  // // eslint-disable-next-line no-underscore-dangle
+  // (getWrapperElement().querySelector('foo') as any).__testTrigger(outputPropName, data);
 }
 
 function addTestOutputTrigger(instance: any, nativeElement: any, ngZone: NgZone): void {
@@ -1988,16 +2212,18 @@ function addTestOutputTrigger(instance: any, nativeElement: any, ngZone: NgZone)
   };
 }
 
-// function buildNgReflectBindingStr(propName: string, value: any): string {
-//   // Simple came case to dash case. Doesn't handle all camel case string formats.
-//   const name = !propName
-//     ? null
-//     : propName.replace(/([A-Z])/g, (g) => {
-//         return `-${g[0].toLowerCase()}`;
-//       });
+function buildNgReflectBindingStr(propName: string, value: any): string {
+  // Simple came case to dash case. Doesn't handle all camel case string formats.
+  const name = !propName
+    ? null
+    : propName
+        .replace(/([A-Z])/g, (g) => {
+          return `-${g[0].toLowerCase()}`;
+        })
+        .replace(/[$@]/g, '_');
 
-//   return `ng-reflect-${name}="${value}"`;
-// }
+  return `ng-reflect-${name}="${value}"`;
+}
 
 // function buildTemplate(props: { [name: string]: any }, addBindings = false): string {
 //   let bindingsStr = '';
