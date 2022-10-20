@@ -87,13 +87,6 @@ export abstract class AbstractRenderer {
 
   /**
    * Bootstrap main angular module with main component or send only new `props` with storyProps$
-   *
-   * @param storyFnAngular {StoryFnAngularReturnType}
-   * @param forced {boolean} If :
-   * - true render will only use the StoryFn `props' in storyProps observable that will update sotry's component/template properties. Improves performance without reloading the whole module&component if props changes
-   * - false fully recharges or initializes angular module & component
-   * @param component {Component}
-   * @param parameters {Parameters}
    */
   public async render({
     storyFnAngular,
@@ -102,10 +95,32 @@ export abstract class AbstractRenderer {
     component,
     targetDOMNode,
   }: {
+    /** StoryFn return type. */
     storyFnAngular: StoryFnAngularReturnType;
+    /**
+     * If :
+     * - true render will only use the StoryFn `props' in storyProps observable
+     *   that will update story's component/template properties. Improves
+     *   performance without reloading the whole module&component if props
+     *   changes.
+     * - false fully recharges or initializes angular module & component.
+     */
     forced: boolean;
+    /**
+     * Component the story is for.
+     *
+     * Props changes will update properties on instances of this component.
+     *
+     * If `storyFnAngular.template` is not set then a template rendering this
+     * component will be generated.
+     */
     component?: any;
+    /** Story's Parameters. */
     parameters: Parameters;
+    /**
+     * The HTMLElement bootstrapped by the story will be appended as a child of
+     * this element.
+     */
     targetDOMNode: HTMLElement;
   }) {
     const targetSelector = `${this.generateTargetSelectorFromStoryId()}`;

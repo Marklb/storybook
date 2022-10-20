@@ -52,20 +52,23 @@ export type Parameters = DefaultParameters & {
   angularLegacyRendering?: boolean;
   bootstrapModuleOptions?: unknown;
   /**
-   * When story does not have `template` then ngOnChanges hook will be called
-   * manually for props changed after inital render. Necessary because Angular
-   * does not support dynamically adding template bindings.
+   * Toggle property updates for properties that are not bound in the template.
+   *
+   * By default, props changes for properties without a binding will be set on
+   * the component instance in a way that input property changes will be in
+   * ngOnChanges. Setting this to false will disable setting any properties or
+   * subscribing to any output properties, unless they are bound in the
+   * template.
    *
    * @default true
    */
-  emulatePropBindingIfNotInInitialProps?: boolean;
+  emulatePropBindingIfNotTemplateBound?: boolean;
   /**
-   * When a story has a template with multiple instances of the story component
-   * then props will be applied to each instance.
+   * Toggle setting properties on the component instance that are not an input.
    *
    * @default true
    */
-  setPropsOnAllComponentInstances?: boolean;
+  setNonInputOutputProperties?: boolean;
 };
 
 export type StoryContext = DefaultStoryContext<AngularFramework> & { parameters: Parameters };

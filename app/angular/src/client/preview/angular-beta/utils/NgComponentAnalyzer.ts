@@ -1,4 +1,12 @@
-import { Component, Directive, Input, Output, Pipe, Type } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  Directive,
+  Input,
+  Output,
+  Pipe,
+  Type,
+} from '@angular/core';
 
 export type ComponentIORecord = {
   propName: string;
@@ -101,6 +109,13 @@ export const isComponent = (component: any): component is Type<unknown> => {
   return (decorators || []).some((d) => d instanceof Component);
 };
 
+export const isUsingOnPush = (directiveMetadata: Component | Directive): boolean => {
+  return (
+    directiveMetadata instanceof Component &&
+    directiveMetadata.changeDetection === ChangeDetectionStrategy.OnPush
+  );
+};
+
 /**
  * Returns all component decorator properties
  * is used to get all `@Input` and `@Output` Decorator
@@ -125,7 +140,9 @@ export const getComponentPropsDecoratorMetadata = (component: any) => {
 };
 
 /**
- * Returns component decorator `@Component`
+ * Returns component or directive decorator metadata.
+ *
+ * Metadata generated from `@Component` or @Directive`.
  */
 export const getComponentDecoratorMetadata = (
   component: any

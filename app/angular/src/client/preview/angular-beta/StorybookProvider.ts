@@ -1,8 +1,8 @@
-import { InjectionToken, NgZone, Provider } from '@angular/core';
+import { NgZone, Provider } from '@angular/core';
 import { Observable, Subject, Subscriber } from 'rxjs';
-import { ICollection } from '../types';
 
-export const STORY_PROPS = new InjectionToken<Subject<ICollection | undefined>>('STORY_PROPS');
+import { STORY_PROPS } from './InjectionTokens';
+import { ICollection } from '../types';
 
 export const storyPropsProvider = (storyProps$: Subject<ICollection | undefined>): Provider => ({
   provide: STORY_PROPS,

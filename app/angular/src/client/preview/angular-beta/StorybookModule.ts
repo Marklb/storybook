@@ -1,4 +1,4 @@
-import { NgModule, Type } from '@angular/core';
+import { NgModule, Provider, Type } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
 import dedent from 'ts-dedent';
 
@@ -12,6 +12,7 @@ import { isDeclarable } from './utils/NgComponentAnalyzer';
 import { createStorybookWrapperComponent } from './StorybookWrapperComponent';
 import { computesTemplateFromComponent } from './ComputesTemplateFromComponent';
 import { createStorybookWrapperDirective } from './StorybookPropsDirective';
+import { STORY_PARAMETERS } from './InjectionTokens';
 
 const deprecatedStoryComponentWarning = deprecate(
   () => {},
@@ -55,17 +56,20 @@ export const getStorybookModuleMetadata = (
   }
 
   /**
-   * Create a component that wraps generated template and gives it props
+   * Create a component that wraps generated template and adds props to the
+   * template context.
    */
   const ComponentToInject = createStorybookWrapperComponent(
     targetSelector,
     template,
     component,
-    styles,
-    props,
-    parameters
+    styles
   );
 
+  /**
+   * Create a directive that shares a selector with the story's component to
+   * attach a directive to each instance for updating props.
+   */
   const DirectiveToInject = hasNoComponent(component)
     ? null
     : createStorybookWrapperDirective(component, hasTemplate);
@@ -79,6 +83,14 @@ export const getStorybookModuleMetadata = (
       moduleMetadata.imports
     );
 
+  const storyProviders: Provider[] = [
+    storyPropsProvider(storyProps$),
+    {
+      provide: STORY_PARAMETERS,
+      useValue: parameters,
+    },
+  ];
+
   return {
     declarations: [
       ...(requiresComponentDeclaration ? [component] : []),
@@ -87,7 +99,7 @@ export const getStorybookModuleMetadata = (
       ...(moduleMetadata.declarations ?? []),
     ],
     imports: [BrowserModule, ...(moduleMetadata.imports ?? [])],
-    providers: [storyPropsProvider(storyProps$), ...(moduleMetadata.providers ?? [])],
+    providers: [...storyProviders, ...(moduleMetadata.providers ?? [])],
     entryComponents: [...(moduleMetadata.entryComponents ?? [])],
     schemas: [...(moduleMetadata.schemas ?? [])],
     bootstrap: [ComponentToInject],

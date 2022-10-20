@@ -68,9 +68,7 @@ describe('RendererFactory', () => {
         targetDOMNode: rootTargetDOMNode,
       });
 
-      expect(document.body.getElementsByTagName('my-story')[0].innerHTML).toBe(
-        '<foo>🦊</foo><!--container-->'
-      );
+      expect(document.body.getElementsByTagName('my-story')[0].innerHTML).toBe('<foo>🦊</foo>');
     });
 
     it('should handle circular reference in moduleMetadata', async () => {
@@ -278,7 +276,7 @@ describe('RendererFactory', () => {
         });
 
         expect(document.body.getElementsByTagName('sb-my--component')[0].innerHTML).toBe(
-          '<foo>🦊</foo><!--container-->'
+          '<foo>🦊</foo>'
         );
       });
     });
