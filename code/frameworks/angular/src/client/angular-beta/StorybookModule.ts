@@ -1,7 +1,10 @@
+import { Type } from '@angular/core';
+
 import { StoryFnAngularReturnType } from '../types';
 import { createStorybookWrapperComponent } from './StorybookWrapperComponent';
 import { computesTemplateFromComponent } from './ComputesTemplateFromComponent';
 import { PropertyExtractor } from './utils/PropertyExtractor';
+import { createStorybookWrapperDirective } from './StorybookPropsDirective';
 
 export const getApplication = ({
   storyFnAngular,
@@ -23,6 +26,14 @@ export const getApplication = ({
   }
 
   /**
+   * Create a directive that shares a selector with the story's component to
+   * attach a directive to each instance for updating props.
+   */
+  const DirectiveToInject = hasNoComponent(component)
+    ? null
+    : createStorybookWrapperDirective(component, hasTemplate);
+
+  /**
    * Create a component that wraps generated template and gives it props
    */
   return createStorybookWrapperComponent({
@@ -30,6 +41,7 @@ export const getApplication = ({
     selector: targetSelector,
     template,
     storyComponent: component,
+    storyDirective: DirectiveToInject,
     styles,
     initialProps: props,
     analyzedMetadata,
@@ -38,4 +50,8 @@ export const getApplication = ({
 
 function hasNoTemplate(template: string | null | undefined): template is undefined {
   return template === null || template === undefined;
+}
+
+function hasNoComponent(component: Type<any> | null | undefined): component is undefined {
+  return component === null || component === undefined;
 }

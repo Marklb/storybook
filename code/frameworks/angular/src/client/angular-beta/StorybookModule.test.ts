@@ -1,10 +1,10 @@
-import { NgModule, Type, Component, EventEmitter, Input, Output } from '@angular/core';
+import { NgModule, Component, EventEmitter, Input, Output } from '@angular/core';
 
 import { TestBed } from '@angular/core/testing';
 import { BehaviorSubject } from 'rxjs';
 import { ICollection } from '../types';
 import { getApplication } from './StorybookModule';
-import { storyPropsProvider } from './StorybookProvider';
+import { storyParametersProvider, storyPropsProvider } from './StorybookProvider';
 import { PropertyExtractor } from './utils/PropertyExtractor';
 
 describe('StorybookModule', () => {
@@ -66,7 +66,10 @@ describe('StorybookModule', () => {
 
         const { fixture } = await configureTestingModule({
           imports: [application],
-          providers: [storyPropsProvider(new BehaviorSubject<ICollection>(props))],
+          providers: [
+            storyPropsProvider(new BehaviorSubject<ICollection>(props)),
+            storyParametersProvider({}),
+          ],
         });
         fixture.detectChanges();
 
@@ -105,7 +108,10 @@ describe('StorybookModule', () => {
 
         const { fixture } = await configureTestingModule({
           imports: [application],
-          providers: [storyPropsProvider(new BehaviorSubject<ICollection>(props))],
+          providers: [
+            storyPropsProvider(new BehaviorSubject<ICollection>(props)),
+            storyParametersProvider({}),
+          ],
         });
         fixture.detectChanges();
 
@@ -133,7 +139,7 @@ describe('StorybookModule', () => {
         });
         const { fixture } = await configureTestingModule({
           imports: [application],
-          providers: [storyPropsProvider(storyProps$)],
+          providers: [storyPropsProvider(storyProps$), storyParametersProvider({})],
         });
         fixture.detectChanges();
 
@@ -189,7 +195,7 @@ describe('StorybookModule', () => {
         });
         const { fixture } = await configureTestingModule({
           imports: [application],
-          providers: [storyPropsProvider(storyProps$)],
+          providers: [storyPropsProvider(storyProps$), storyParametersProvider({})],
         });
         fixture.detectChanges();
 
@@ -233,7 +239,7 @@ describe('StorybookModule', () => {
         });
         const { fixture } = await configureTestingModule({
           imports: [application],
-          providers: [storyPropsProvider(storyProps$)],
+          providers: [storyPropsProvider(storyProps$), storyParametersProvider({})],
         });
         fixture.detectChanges();
         expect(fixture.nativeElement.querySelector('p').style.color).toEqual('red');
@@ -268,7 +274,7 @@ describe('StorybookModule', () => {
         });
         const { fixture } = await configureTestingModule({
           imports: [application],
-          providers: [storyPropsProvider(storyProps$)],
+          providers: [storyPropsProvider(storyProps$), storyParametersProvider({})],
         });
 
         fixture.detectChanges();
@@ -311,7 +317,10 @@ describe('StorybookModule', () => {
 
         const { fixture } = await configureTestingModule({
           imports: [application],
-          providers: [storyPropsProvider(new BehaviorSubject<ICollection>(props))],
+          providers: [
+            storyPropsProvider(new BehaviorSubject<ICollection>(props)),
+            storyParametersProvider({}),
+          ],
         });
         fixture.detectChanges();
 
@@ -337,7 +346,10 @@ describe('StorybookModule', () => {
 
       const { fixture } = await configureTestingModule({
         imports: [application],
-        providers: [storyPropsProvider(new BehaviorSubject<ICollection>({}))],
+        providers: [
+          storyPropsProvider(new BehaviorSubject<ICollection>({})),
+          storyParametersProvider({}),
+        ],
       });
       fixture.detectChanges();
 

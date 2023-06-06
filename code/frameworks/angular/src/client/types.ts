@@ -48,6 +48,24 @@ export interface AngularRenderer extends WebRenderer {
 
 export type Parameters = DefaultParameters & {
   bootstrapModuleOptions?: unknown;
+  /**
+   * Toggle property updates for properties that are not bound in the template.
+   *
+   * By default, props changes for properties without a binding will be set on
+   * the component instance in a way that input property changes will be in
+   * ngOnChanges. Setting this to false will disable setting any properties or
+   * subscribing to any output properties, unless they are bound in the
+   * template.
+   *
+   * @default true
+   */
+  emulatePropBindingIfNotTemplateBound?: boolean;
+  /**
+   * Toggle setting properties on the component instance that are not an input.
+   *
+   * @default true
+   */
+  setNonInputOutputProperties?: boolean;
 };
 
 export type StoryContext = DefaultStoryContext<AngularRenderer> & { parameters: Parameters };
