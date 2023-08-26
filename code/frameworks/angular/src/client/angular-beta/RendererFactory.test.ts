@@ -67,7 +67,7 @@ describe('RendererFactory', () => {
       });
 
       expect(document.body.getElementsByTagName('storybook-root')[0].innerHTML).toBe(
-        '<foo>🦊</foo><!--container-->'
+        '<foo>🦊</foo>'
       );
     });
 

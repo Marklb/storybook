@@ -5,13 +5,14 @@ import { BehaviorSubject, Subject } from 'rxjs';
 import { stringify } from 'telejson';
 import { ICollection, Parameters, StoryFnAngularReturnType } from '../types';
 import { getApplication } from './StorybookModule';
-import { storyPropsProvider } from './StorybookProvider';
+import { storyParametersProvider, storyPropsProvider } from './StorybookProvider';
 import { componentNgModules } from './StorybookWrapperComponent';
 import { PropertyExtractor } from './utils/PropertyExtractor';
 
 type StoryRenderInfo = {
   storyFnAngular: StoryFnAngularReturnType;
   moduleMetadataSnapshot: string;
+  parameters?: Parameters;
 };
 
 const applicationRefs = new Map<HTMLElement, ApplicationRef>();
@@ -83,22 +84,25 @@ export abstract class AbstractRenderer {
   public async render({
     storyFnAngular,
     forced,
+    parameters,
     component,
     targetDOMNode,
   }: {
     storyFnAngular: StoryFnAngularReturnType;
     forced: boolean;
+    parameters?: Parameters;
     component?: any;
     targetDOMNode: HTMLElement;
   }) {
     const targetSelector = this.generateTargetSelectorFromStoryId(targetDOMNode.id);
 
-    const newStoryProps$ = new BehaviorSubject<ICollection>(storyFnAngular.props);
+    const newStoryProps$ = new BehaviorSubject<ICollection | undefined>(storyFnAngular.props);
 
     if (
       !this.fullRendererRequired({
         targetDOMNode,
         storyFnAngular,
+        parameters,
         moduleMetadata: {
           ...storyFnAngular.moduleMetadata,
         },
@@ -133,6 +137,7 @@ export abstract class AbstractRenderer {
       ...storyFnAngular.applicationConfig,
       providers: [
         storyPropsProvider(newStoryProps$),
+        storyParametersProvider(parameters),
         ...analyzedMetadata.applicationProviders,
         ...(storyFnAngular.applicationConfig?.providers ?? []),
       ],
@@ -171,11 +176,13 @@ export abstract class AbstractRenderer {
   private fullRendererRequired({
     targetDOMNode,
     storyFnAngular,
+    parameters,
     moduleMetadata,
     forced,
   }: {
     targetDOMNode: HTMLElement;
     storyFnAngular: StoryFnAngularReturnType;
+    parameters?: Parameters;
     moduleMetadata: NgModule;
     forced: boolean;
   }) {
@@ -184,6 +191,11 @@ export abstract class AbstractRenderer {
     const currentStoryRender = {
       storyFnAngular,
       moduleMetadataSnapshot: stringify(moduleMetadata),
+      parameters: {
+        bootstrapModuleOptions: parameters?.bootstrapModuleOptions,
+        emulatePropBindingIfNotTemplateBound: parameters?.emulatePropBindingIfNotTemplateBound,
+        setNonInputOutputProperties: parameters?.setNonInputOutputProperties,
+      },
     };
 
     this.previousStoryRenderInfo.set(targetDOMNode, currentStoryRender);
@@ -192,7 +204,9 @@ export abstract class AbstractRenderer {
       // check `forceRender` of story RenderContext
       !forced ||
       // if it's the first rendering and storyProps$ is not init
-      !this.storyProps$
+      !this.storyProps$ ||
+      // if a previous render hasn't happened
+      !previousStoryRenderInfo
     ) {
       return true;
     }
@@ -208,7 +222,19 @@ export abstract class AbstractRenderer {
     // force the rendering if the metadata structure has changed
     const hasChangedModuleMetadata =
       currentStoryRender.moduleMetadataSnapshot !== previousStoryRenderInfo?.moduleMetadataSnapshot;
+    if (hasChangedModuleMetadata) {
+      return true;
+    }
 
-    return hasChangedModuleMetadata;
+    // force the rendering if parameters change that have an effect that can't change after render
+    const hasChangedParameter =
+      currentStoryRender.parameters.bootstrapModuleOptions !==
+        previousStoryRenderInfo?.parameters.bootstrapModuleOptions ||
+      currentStoryRender.parameters.emulatePropBindingIfNotTemplateBound !==
+        previousStoryRenderInfo?.parameters.emulatePropBindingIfNotTemplateBound ||
+      currentStoryRender.parameters.setNonInputOutputProperties !==
+        previousStoryRenderInfo?.parameters.setNonInputOutputProperties;
+
+    return hasChangedParameter;
   }
 }

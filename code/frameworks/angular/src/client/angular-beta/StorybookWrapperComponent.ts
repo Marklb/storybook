@@ -1,35 +1,18 @@
 import {
-  AfterViewInit,
-  ChangeDetectorRef,
   Component,
-  ElementRef,
   Inject,
   NgModule,
   OnDestroy,
+  OnInit,
   Type,
-  ViewChild,
-  ViewContainerRef,
+  forwardRef,
+  inject,
 } from '@angular/core';
-import { Subject, Subscription } from 'rxjs';
-import { map, skip } from 'rxjs/operators';
+import { Observable, Subscription } from 'rxjs';
 
 import { ICollection, NgModuleMetadata } from '../types';
-import { STORY_PROPS } from './StorybookProvider';
-import { ComponentInputsOutputs, getComponentInputsOutputs } from './utils/NgComponentAnalyzer';
+import { STORY_PROPS, STORY_WRAPPER_COMPONENT } from './InjectionTokens';
 import { PropertyExtractor } from './utils/PropertyExtractor';
-
-const getNonInputsOutputsProps = (
-  ngComponentInputsOutputs: ComponentInputsOutputs,
-  props: ICollection = {}
-) => {
-  const inputs = ngComponentInputsOutputs.inputs
-    .filter((i) => i.templateName in props)
-    .map((i) => i.templateName);
-  const outputs = ngComponentInputsOutputs.outputs
-    .filter((o) => o.templateName in props)
-    .map((o) => o.templateName);
-  return Object.keys(props).filter((k) => ![...inputs, ...outputs].includes(k));
-};
 
 // component modules cache
 export const componentNgModules = new Map<any, Type<any>>();
@@ -41,6 +24,7 @@ export const createStorybookWrapperComponent = ({
   selector,
   template,
   storyComponent,
+  storyDirective,
   styles,
   moduleMetadata,
   initialProps,
@@ -49,15 +33,12 @@ export const createStorybookWrapperComponent = ({
   selector: string;
   template: string;
   storyComponent: Type<unknown> | undefined;
+  storyDirective: Type<unknown> | undefined;
   styles: string[];
   moduleMetadata: NgModuleMetadata;
   initialProps?: ICollection;
   analyzedMetadata: PropertyExtractor;
 }): Type<any> => {
-  // In ivy, a '' selector is not allowed, therefore we need to just set it to anything if
-  // storyComponent was not provided.
-  const viewChildSelector = storyComponent ?? '__storybook-noop';
-
   const { imports, declarations, providers } = analyzedMetadata;
 
   // Only create a new module if it doesn't already exist
@@ -80,89 +61,49 @@ export const createStorybookWrapperComponent = ({
 
   PropertyExtractor.warnImportsModuleWithProviders(analyzedMetadata);
 
+  const componentImports = [ngModule];
+  if (storyDirective) {
+    componentImports.push(storyDirective);
+  }
+
   @Component({
     selector,
     template,
     standalone: true,
-    imports: [ngModule],
-    providers,
+    imports: componentImports,
+    providers: [
+      ...providers,
+      {
+        provide: STORY_WRAPPER_COMPONENT,
+        useExisting: forwardRef(() => StorybookWrapperComponent),
+      },
+    ],
     styles,
     schemas: moduleMetadata.schemas,
   })
-  class StorybookWrapperComponent implements AfterViewInit, OnDestroy {
-    private storyComponentPropsSubscription: Subscription;
-
-    private storyWrapperPropsSubscription: Subscription;
-
-    @ViewChild(viewChildSelector, { static: true }) storyComponentElementRef: ElementRef;
-
-    @ViewChild(viewChildSelector, { read: ViewContainerRef, static: true })
-    storyComponentViewContainerRef: ViewContainerRef;
+  class StorybookWrapperComponent implements OnInit, OnDestroy {
+    private storyWrapperPropsSubscription = Subscription.EMPTY;
 
     // Used in case of a component without selector
     storyComponent = storyComponent ?? '';
 
-    constructor(
-      @Inject(STORY_PROPS) private storyProps$: Subject<ICollection | undefined>,
-      @Inject(ChangeDetectorRef) private changeDetectorRef: ChangeDetectorRef
-    ) {}
+    private readonly storyProps$: Observable<ICollection | undefined> = inject(STORY_PROPS);
+
+    // constructor(
+    //   @Inject(STORY_PROPS) private readonly storyProps$: Observable<ICollection | undefined>
+    // ) {}
 
     ngOnInit(): void {
       // Subscribes to the observable storyProps$ to keep these properties up to date
       this.storyWrapperPropsSubscription = this.storyProps$.subscribe((storyProps = {}) => {
-        // All props are added as component properties
+        // All props are added as component properties, so they can be used in
+        // the template binding context.
         Object.assign(this, storyProps);
-
-        this.changeDetectorRef.detectChanges();
-        this.changeDetectorRef.markForCheck();
       });
     }
 
-    ngAfterViewInit(): void {
-      // Bind properties to component, if the story have component
-      if (this.storyComponentElementRef) {
-        const ngComponentInputsOutputs = getComponentInputsOutputs(storyComponent);
-
-        const initialOtherProps = getNonInputsOutputsProps(ngComponentInputsOutputs, initialProps);
-
-        // Initializes properties that are not Inputs | Outputs
-        // Allows story props to override local component properties
-        initialOtherProps.forEach((p) => {
-          (this.storyComponentElementRef as any)[p] = initialProps[p];
-        });
-        // `markForCheck` the component in case this uses changeDetection: OnPush
-        // And then forces the `detectChanges`
-        this.storyComponentViewContainerRef.injector.get(ChangeDetectorRef).markForCheck();
-        this.changeDetectorRef.detectChanges();
-
-        // Once target component has been initialized, the storyProps$ observable keeps target component properties than are not Input|Output up to date
-        this.storyComponentPropsSubscription = this.storyProps$
-          .pipe(
-            skip(1),
-            map((props) => {
-              const propsKeyToKeep = getNonInputsOutputsProps(ngComponentInputsOutputs, props);
-              return propsKeyToKeep.reduce((acc, p) => ({ ...acc, [p]: props[p] }), {});
-            })
-          )
-          .subscribe((props) => {
-            // Replace inputs with new ones from props
-            Object.assign(this.storyComponentElementRef, props);
-
-            // `markForCheck` the component in case this uses changeDetection: OnPush
-            // And then forces the `detectChanges`
-            this.storyComponentViewContainerRef.injector.get(ChangeDetectorRef).markForCheck();
-            this.changeDetectorRef.detectChanges();
-          });
-      }
-    }
-
     ngOnDestroy(): void {
-      if (this.storyComponentPropsSubscription != null) {
-        this.storyComponentPropsSubscription.unsubscribe();
-      }
-      if (this.storyWrapperPropsSubscription != null) {
-        this.storyWrapperPropsSubscription.unsubscribe();
-      }
+      this.storyWrapperPropsSubscription.unsubscribe();
     }
   }
   return StorybookWrapperComponent;

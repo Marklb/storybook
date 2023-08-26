@@ -18,6 +18,7 @@ const TestComponent1 = Component({})(class {});
 const TestComponent2 = Component({})(class {});
 const StandaloneTestComponent = Component({ standalone: true })(class {});
 const TestDirective = Directive({})(class {});
+const StandaloneTestDirective = Directive({ standalone: true })(class {});
 const TestModuleWithDeclarations = NgModule({ declarations: [TestComponent1] })(class {});
 const TestModuleWithImportsAndProviders = NgModule({
   imports: [TestModuleWithDeclarations],
@@ -118,6 +119,20 @@ describe('PropertyExtractor', () => {
         StandaloneTestComponent,
       ]);
     });
+
+    it('should return standalone directives', () => {
+      const imports = extractImports(
+        {
+          imports: [TestModuleWithImportsAndProviders],
+        },
+        StandaloneTestDirective
+      );
+      expect(imports).toEqual([
+        CommonModule,
+        TestModuleWithImportsAndProviders,
+        StandaloneTestDirective,
+      ]);
+    });
   });
 
   describe('extractDeclarations', () => {
@@ -133,8 +148,13 @@ describe('PropertyExtractor', () => {
       expect(isStandalone).toBe(false);
     });
 
-    it('isStandalone should be true', () => {
+    it('isStandalone should be true for component', () => {
       const { isStandalone } = PropertyExtractor.analyzeDecorators(StandaloneTestComponent);
+      expect(isStandalone).toBe(true);
+    });
+
+    it('isStandalone should be true for directive', () => {
+      const { isStandalone } = PropertyExtractor.analyzeDecorators(StandaloneTestDirective);
       expect(isStandalone).toBe(true);
     });
   });

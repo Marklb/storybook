@@ -6,19 +6,19 @@ import {
   Output,
   Pipe,
   ɵReflectionCapabilities as ReflectionCapabilities,
+  ChangeDetectionStrategy,
 } from '@angular/core';
 
 const reflectionCapabilities = new ReflectionCapabilities();
 
+export type ComponentIORecord = {
+  propName: string;
+  templateName: string;
+};
+
 export type ComponentInputsOutputs = {
-  inputs: {
-    propName: string;
-    templateName: string;
-  }[];
-  outputs: {
-    propName: string;
-    templateName: string;
-  }[];
+  inputs: ComponentIORecord[];
+  outputs: ComponentIORecord[];
 };
 
 /**
@@ -124,6 +124,13 @@ export const isStandaloneComponent = (component: any): component is Type<unknown
   );
 };
 
+export const isUsingOnPush = (directiveMetadata: Component | Directive): boolean => {
+  return (
+    directiveMetadata instanceof Component &&
+    directiveMetadata.changeDetection === ChangeDetectionStrategy.OnPush
+  );
+};
+
 /**
  * Returns all component decorator properties
  * is used to get all `@Input` and `@Output` Decorator
@@ -133,10 +140,12 @@ export const getComponentPropsDecoratorMetadata = (component: any) => {
 };
 
 /**
- * Returns component decorator `@Component`
+ * Returns component decorator `@Component` or @Directive`.
  */
-export const getComponentDecoratorMetadata = (component: any): Component | undefined => {
+export const getComponentDecoratorMetadata = (
+  component: any
+): Component | Directive | undefined => {
   const decorators = reflectionCapabilities.annotations(component);
 
-  return decorators.reverse().find((d) => d instanceof Component);
+  return decorators.reverse().find((d) => d instanceof Component || d instanceof Directive);
 };
